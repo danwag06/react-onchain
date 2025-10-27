@@ -138,7 +138,8 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
 
   // Also look for string literals that might be asset paths
   // Match patterns like "/assets/logo.png" or "./image.jpg"
-  const assetPattern = /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json))["']/gi;
+  const assetPattern =
+    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json))["']/gi;
   let match;
 
   while ((match = assetPattern.exec(content)) !== null) {
@@ -171,7 +172,7 @@ async function analyzeFile(filePath: string, baseDir: string): Promise<FileRefer
   }
 
   // Remove duplicates and normalize paths
-  dependencies = [...new Set(dependencies)].map(dep => {
+  dependencies = [...new Set(dependencies)].map((dep) => {
     try {
       return relative(baseDir, dep);
     } catch {

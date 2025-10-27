@@ -6,7 +6,11 @@ import { resolve } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { deployToChain, generateManifest, saveManifest } from './orchestrator.js';
-import { getContractInfo, getVersionHistory, getVersionDetails } from './versioningContractHandler.js';
+import {
+  getContractInfo,
+  getVersionHistory,
+  getVersionDetails,
+} from './versioningContractHandler.js';
 import { config as envConfig } from './config.js';
 import type { DeploymentConfig, InscribedFile } from './types.js';
 
@@ -31,31 +35,26 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
 
   // Table header
   console.log(chalk.gray('─'.repeat(70)));
-  console.log(
-    chalk.gray('File'.padEnd(40)) +
-    chalk.gray('Size'.padEnd(15)) +
-    chalk.gray('TXID')
-  );
+  console.log(chalk.gray('File'.padEnd(40)) + chalk.gray('Size'.padEnd(15)) + chalk.gray('TXID'));
   console.log(chalk.gray('─'.repeat(70)));
 
   // File rows
   inscriptions.forEach((file) => {
-    const fileName = file.originalPath.length > 38
-      ? '...' + file.originalPath.slice(-35)
-      : file.originalPath;
+    const fileName =
+      file.originalPath.length > 38 ? '...' + file.originalPath.slice(-35) : file.originalPath;
 
     console.log(
       chalk.cyan(fileName.padEnd(40)) +
-      chalk.yellow(formatBytes(file.size).padEnd(15)) +
-      chalk.gray(file.txid.slice(0, 12) + '...')
+        chalk.yellow(formatBytes(file.size).padEnd(15)) +
+        chalk.gray(file.txid.slice(0, 12) + '...')
     );
   });
 
   console.log(chalk.gray('─'.repeat(70)));
   console.log(
     chalk.bold('TOTAL'.padEnd(40)) +
-    chalk.bold.green(formatBytes(totalSize).padEnd(15)) +
-    chalk.bold.gray(`${inscriptions.length} file${inscriptions.length !== 1 ? 's' : ''}`)
+      chalk.bold.green(formatBytes(totalSize).padEnd(15)) +
+      chalk.bold.gray(`${inscriptions.length} file${inscriptions.length !== 1 ? 's' : ''}`)
   );
   console.log(chalk.gray('─'.repeat(70)) + '\n');
 }
@@ -70,18 +69,42 @@ program
   .description('Deploy a React build directory to the blockchain')
   .option('-b, --build-dir <directory>', 'Build directory to deploy', envConfig.buildDir)
   .option('-p, --payment-key <wif>', 'Payment private key (WIF format)', envConfig.paymentKey)
-  .option('-d, --destination <address>', 'Destination address for inscriptions', envConfig.destinationAddress)
+  .option(
+    '-d, --destination <address>',
+    'Destination address for inscriptions',
+    envConfig.destinationAddress
+  )
   .option('-c, --change <address>', 'Change address (optional)', envConfig.changeAddress)
   .option('-s, --sats-per-kb <number>', 'Satoshis per KB for fees', String(envConfig.satsPerKb))
   .option('-m, --manifest <file>', 'Output manifest file', envConfig.manifestFile)
   .option('--dry-run', 'Simulate deployment without broadcasting transactions', envConfig.dryRun)
-  .option('--ordinal-content-url <url>', 'Ordinal content delivery URL', envConfig.ordinalContentUrl)
+  .option(
+    '--ordinal-content-url <url>',
+    'Ordinal content delivery URL',
+    envConfig.ordinalContentUrl
+  )
   .option('--ordinal-indexer-url <url>', 'Ordinal indexer API URL', envConfig.ordinalIndexerUrl)
-  .option('--enable-service-resolver', 'Enable service resolver for runtime failover', envConfig.enableServiceResolver)
+  .option(
+    '--enable-service-resolver',
+    'Enable service resolver for runtime failover',
+    envConfig.enableServiceResolver
+  )
   .option('--disable-service-resolver', 'Disable service resolver')
-  .option('--version-tag <string>', 'Version tag for this deployment (e.g., "1.0.0")', envConfig.versionTag)
-  .option('--version-description <string>', 'Description/changelog for this version', envConfig.versionDescription)
-  .option('--versioning-contract <outpoint>', 'Existing versioning contract outpoint (txid_vout)', envConfig.versioningContract)
+  .option(
+    '--version-tag <string>',
+    'Version tag for this deployment (e.g., "1.0.0")',
+    envConfig.versionTag
+  )
+  .option(
+    '--version-description <string>',
+    'Description/changelog for this version',
+    envConfig.versionDescription
+  )
+  .option(
+    '--versioning-contract <outpoint>',
+    'Existing versioning contract outpoint (txid_vout)',
+    envConfig.versioningContract
+  )
   .option('--app-name <string>', 'Application name for new versioning contract', envConfig.appName)
   .action(async (options) => {
     try {
@@ -117,9 +140,7 @@ program
       // Check for index.html
       const indexPath = resolve(buildDir, 'index.html');
       if (!existsSync(indexPath)) {
-        console.error(
-          chalk.red(`Error: index.html not found in build directory: ${buildDir}`)
-        );
+        console.error(chalk.red(`Error: index.html not found in build directory: ${buildDir}`));
         process.exit(1);
       }
 
@@ -142,7 +163,9 @@ program
         if (options.versioningContract) {
           console.log(chalk.gray(`Versioning contract: ${options.versioningContract}`));
         } else if (options.appName) {
-          console.log(chalk.gray(`App name: ${options.appName} (new versioning contract will be created)`));
+          console.log(
+            chalk.gray(`App name: ${options.appName} (new versioning contract will be created)`)
+          );
         }
       }
       console.log();
@@ -187,9 +210,7 @@ program
           spinner.text = `Inscribing ${chalk.cyan(file)} (${current}/${total})`;
         },
         onInscriptionComplete: (file, url) => {
-          spinner.succeed(
-            chalk.green(`✓ ${file}`) + chalk.gray(` → ${url}`)
-          );
+          spinner.succeed(chalk.green(`✓ ${file}`) + chalk.gray(` → ${url}`));
           spinner = ora('Inscribing files...').start();
         },
         onDeploymentComplete: (entryPointUrl) => {
@@ -233,13 +254,18 @@ program
       console.log(chalk.gray(`Manifest saved to: ${manifestPath}\n`));
 
       if (options.dryRun) {
-        console.log(chalk.yellow.bold('📋 This was a dry run. To deploy for real, remove --dry-run flag.\n'));
+        console.log(
+          chalk.yellow.bold('📋 This was a dry run. To deploy for real, remove --dry-run flag.\n')
+        );
       } else {
         console.log(chalk.bold('🌐 Your app is now live on the blockchain!'));
-        console.log(chalk.gray('⏱️  Note: It may take up to 1 confirmation (~10 minutes) for your app to be fully accessible.\n'));
+        console.log(
+          chalk.gray(
+            '⏱️  Note: It may take up to 1 confirmation (~10 minutes) for your app to be fully accessible.\n'
+          )
+        );
         console.log(chalk.cyan(`Visit: ${result.entryPointUrl}\n`));
       }
-
     } catch (error) {
       console.error(chalk.red('\n❌ Deployment failed:\n'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
@@ -306,7 +332,10 @@ program
       console.log(chalk.gray('─'.repeat(70)));
       console.log(chalk.bold('Version:     ') + chalk.cyan(details.version));
       console.log(chalk.bold('Outpoint:    ') + chalk.gray(details.outpoint));
-      console.log(chalk.bold('URL:         ') + chalk.cyan(`https://ordfs.network/content/${details.outpoint}`));
+      console.log(
+        chalk.bold('URL:         ') +
+          chalk.cyan(`https://ordfs.network/content/${details.outpoint}`)
+      );
       console.log(chalk.bold('Description: ') + details.description);
       console.log(chalk.bold('Deployed:    ') + chalk.gray(details.timestamp));
       console.log(chalk.gray('─'.repeat(70)));
@@ -338,7 +367,10 @@ program
       console.log(chalk.bold('App Name:      ') + info.appName);
       console.log(chalk.bold('Origin:        ') + chalk.gray(info.originOutpoint));
       console.log(chalk.bold('Total Versions:') + ` ${history.length}`);
-      console.log(chalk.bold('Latest Version:') + ` ${history.length > 0 ? chalk.cyan(history[0]) : chalk.gray('(none)')}`);
+      console.log(
+        chalk.bold('Latest Version:') +
+          ` ${history.length > 0 ? chalk.cyan(history[0]) : chalk.gray('(none)')}`
+      );
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
     } catch (error) {

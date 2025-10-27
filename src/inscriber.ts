@@ -1,5 +1,10 @@
 import { readFile } from 'fs/promises';
-import { PrivateKey, type Transaction, type BroadcastResponse, type BroadcastFailure } from '@bsv/sdk';
+import {
+  PrivateKey,
+  type Transaction,
+  type BroadcastResponse,
+  type BroadcastFailure,
+} from '@bsv/sdk';
 import { createOrdinals, fetchPayUtxos } from 'js-1sat-ord';
 import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
@@ -30,7 +35,7 @@ async function broadcast1Sat(tx: Transaction): Promise<BroadcastResponse | Broad
       body: Buffer.from(tx.toBinary()),
     });
 
-    const body = await response.json() as {
+    const body = (await response.json()) as {
       txid: string;
       success: boolean;
       error: string;
@@ -93,7 +98,7 @@ export async function inscribeFile(
     const url = `${contentUrl}/${mockTxid}_${vout}`;
 
     // Small delay to simulate network activity
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     return {
       inscription: {
@@ -118,7 +123,9 @@ export async function inscribeFile(
 
       if (paymentUtxo) {
         // Use the provided UTXO (change from previous transaction)
-        console.log(`   Using change UTXO: ${paymentUtxo.txid}:${paymentUtxo.vout} (${paymentUtxo.satoshis} sats)`);
+        console.log(
+          `   Using change UTXO: ${paymentUtxo.txid}:${paymentUtxo.vout} (${paymentUtxo.satoshis} sats)`
+        );
         utxos = [paymentUtxo];
       } else {
         // Fetch UTXOs from the network (refetches on each retry)
@@ -171,7 +178,6 @@ export async function inscribeFile(
       }
 
       console.log(`   ✅ Broadcast successful: ${broadcastResult.txid}`);
-
 
       return {
         txid: broadcastResult.txid!,
@@ -257,7 +263,7 @@ export async function inscribeFiles(
 
     // Small delay between inscriptions (only if not using change UTXO)
     if (i < files.length - 1 && !changeUtxo) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
@@ -267,10 +273,7 @@ export async function inscribeFiles(
 /**
  * Estimates the cost of inscribing a file
  */
-export function estimateInscriptionCost(
-  fileSize: number,
-  satsPerKb: number = 50
-): number {
+export function estimateInscriptionCost(fileSize: number, satsPerKb: number = 50): number {
   // Base transaction overhead (inputs, outputs, etc.) ~200 bytes
   const baseOverhead = 200;
 

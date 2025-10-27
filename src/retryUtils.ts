@@ -20,7 +20,7 @@ const DEFAULT_OPTIONS: Required<RetryOptions> = {
  * Sleep for a given number of milliseconds
  */
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

@@ -338,6 +338,7 @@ npx react-onchain version:info <CONTRACT_OUTPOINT> <VERSION>
 ```
 
 Shows detailed information for a specific version:
+
 - Version identifier
 - Outpoint (txid_vout)
 - Full URL to access that version
@@ -351,6 +352,7 @@ npx react-onchain contract:info <CONTRACT_OUTPOINT>
 ```
 
 Shows contract details:
+
 - Contract outpoint
 - Application name
 - Origin outpoint
@@ -410,12 +412,12 @@ A JSON manifest is generated after deployment:
 You can use `react-onchain` programmatically:
 
 ```typescript
-import { deployToChain } from "react-onchain";
+import { deployToChain } from 'react-onchain';
 
 const config = {
-  buildDir: "./dist",
-  paymentKey: "your-wif-key",
-  destinationAddress: "your-ordinal-address",
+  buildDir: './dist',
+  paymentKey: 'your-wif-key',
+  destinationAddress: 'your-ordinal-address',
   satsPerKb: 50,
   dryRun: false,
 };
@@ -520,7 +522,55 @@ Point to the correct build directory (usually `./dist` or `./build`).
 
 ## Contributing
 
-Contributions welcome! Please open an issue or PR on GitHub.
+Contributions are welcome! Please follow these guidelines:
+
+### Code Formatting
+
+This project uses [Prettier](https://prettier.io/) for consistent code formatting.
+
+**Format code before committing:**
+
+```bash
+npm run format
+```
+
+**Check if code is formatted correctly:**
+
+```bash
+npm run format:check
+```
+
+**VS Code Setup:**
+
+If you're using VS Code, formatting on save is already configured in `.vscode/settings.json`.
+
+### Development Workflow
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Make your changes
+4. Format your code: `npm run format`
+5. Build and test: `npm run build`
+6. Commit your changes with a descriptive message
+7. Push to your fork and submit a pull request
+
+### Code Style
+
+- Use TypeScript for all new code
+- Follow existing patterns and conventions
+- Add JSDoc comments for public APIs
+- Keep functions focused and single-purpose
+- Use meaningful variable names
+
+### Pull Request Guidelines
+
+- Provide a clear description of the changes
+- Reference any related issues
+- Ensure code is formatted with Prettier
+- Verify the project builds successfully
+- Update documentation if needed
+
+For questions or discussions, please open an issue on GitHub.
 
 ## License
 

@@ -2,7 +2,12 @@ import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
-import { createUrlMap, rewriteFile, injectVersionScript, injectServiceResolverScript } from './rewriter.js';
+import {
+  createUrlMap,
+  rewriteFile,
+  injectVersionScript,
+  injectServiceResolverScript,
+} from './rewriter.js';
 import { inscribeFile } from './inscriber.js';
 import {
   deployVersioningContract,
@@ -10,7 +15,11 @@ import {
   updateContractOrigin,
   VERSIONING_ENABLED,
 } from './versioningContractHandler.js';
-import { getAllOrdinalContentServices, getAllOrdinalIndexers, config as envConfig } from './config.js';
+import {
+  getAllOrdinalContentServices,
+  getAllOrdinalIndexers,
+  config as envConfig,
+} from './config.js';
 import type {
   DeploymentConfig,
   DeploymentResult,
@@ -94,15 +103,9 @@ export async function deployToChain(
     } else {
       // REAL MODE - Deploy actual versioning contract
       if (!VERSIONING_ENABLED) {
-        console.warn(
-          '⚠️  Versioning is enabled but scrypt-ts integration is not complete.'
-        );
-        console.warn(
-          '   The versioning contract will not be deployed/updated.'
-        );
-        console.warn(
-          '   See versioningContractHandler.ts for implementation details.'
-        );
+        console.warn('⚠️  Versioning is enabled but scrypt-ts integration is not complete.');
+        console.warn('   The versioning contract will not be deployed/updated.');
+        console.warn('   See versioningContractHandler.ts for implementation details.');
       } else if (!versioningContract) {
         // First deployment - need to deploy versioning contract
         console.log('📝 Deploying versioning contract...');
@@ -155,13 +158,7 @@ export async function deployToChain(
 
     if (hasDependencies) {
       // Rewrite the file content to use ordfs URLs
-      content = await rewriteFile(
-        absolutePath,
-        buildDir,
-        filePath,
-        fileRef.contentType,
-        urlMap
-      );
+      content = await rewriteFile(absolutePath, buildDir, filePath, fileRef.contentType, urlMap);
     }
 
     // Inject scripts into index.html if needed
@@ -174,20 +171,14 @@ export async function deployToChain(
 
       // Inject service resolver script if enabled
       if (shouldEnableServiceResolver) {
-        content = await injectServiceResolverScript(
-          content,
-          allContentServices,
-          primaryContentUrl
-        );
+        content = await injectServiceResolverScript(content, allContentServices, primaryContentUrl);
       }
 
       // Inject version script if versioning is enabled
       if (enableVersioning && finalVersioningContract) {
         // Extract origin outpoint from entry point URL after inscription
         // For first deployment, we'll use a placeholder that gets updated by the script
-        const originPlaceholder = dryRun
-          ? 'MOCK_ORIGIN_' + Date.now()
-          : 'ORIGIN_' + Date.now();
+        const originPlaceholder = dryRun ? 'MOCK_ORIGIN_' + Date.now() : 'ORIGIN_' + Date.now();
 
         // Inject the version redirect script
         content = await injectVersionScript(
@@ -232,17 +223,17 @@ export async function deployToChain(
     callbacks?.onInscriptionComplete?.(filePath, result.inscription.url);
 
     // Estimate cost (rough approximation)
-    totalCost += Math.ceil((result.inscription.size + 200) / 1000 * (satsPerKb || 50)) + 1;
+    totalCost += Math.ceil(((result.inscription.size + 200) / 1000) * (satsPerKb || 50)) + 1;
 
     // Small delay between inscriptions (only needed if NOT using change UTXO)
     if (i < order.length - 1 && !changeUtxo) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
   // Find the entry point (index.html)
   const entryPoint = inscriptions.find(
-    i => i.originalPath === 'index.html' || i.originalPath.endsWith('/index.html')
+    (i) => i.originalPath === 'index.html' || i.originalPath.endsWith('/index.html')
   );
 
   if (!entryPoint) {
@@ -255,7 +246,8 @@ export async function deployToChain(
       console.log('📝 Updating contract origin...');
 
       try {
-        const entryPointOutpoint = entryPoint.url.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
+        const entryPointOutpoint =
+          entryPoint.url.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
         await updateContractOrigin(
           finalVersioningContract,
           paymentPk,

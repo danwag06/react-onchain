@@ -3,8 +3,14 @@ import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
 
 // Script template paths
-const VERSION_REDIRECT_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'versionRedirect.template.js');
-const SERVICE_RESOLVER_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'serviceResolver.template.js');
+const VERSION_REDIRECT_SCRIPT_PATH = join(
+  import.meta.dirname || __dirname,
+  'versionRedirect.template.js'
+);
+const SERVICE_RESOLVER_SCRIPT_PATH = join(
+  import.meta.dirname || __dirname,
+  'serviceResolver.template.js'
+);
 
 /**
  * Creates a mapping of original paths to ordfs URLs
@@ -127,7 +133,8 @@ export async function rewriteJs(
   let content = await readFile(filePath, 'utf-8');
 
   // Match string literals that look like asset paths
-  const assetPattern = /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|css|js|mjs))["']/gi;
+  const assetPattern =
+    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|css|js|mjs))["']/gi;
 
   content = content.replace(assetPattern, (match, ref) => {
     try {
@@ -147,24 +154,21 @@ export async function rewriteJs(
   });
 
   // Also handle import statements (though these are less common in bundled code)
-  content = content.replace(
-    /import\s+.*?from\s+["']([^"']+)["']/g,
-    (match, ref) => {
-      if (ref.startsWith('./') || ref.startsWith('../') || ref.startsWith('/')) {
-        try {
-          const resolvedPath = resolveReference(ref, originalPath, baseDir);
-          const ordfsUrl = urlMap.get(resolvedPath);
+  content = content.replace(/import\s+.*?from\s+["']([^"']+)["']/g, (match, ref) => {
+    if (ref.startsWith('./') || ref.startsWith('../') || ref.startsWith('/')) {
+      try {
+        const resolvedPath = resolveReference(ref, originalPath, baseDir);
+        const ordfsUrl = urlMap.get(resolvedPath);
 
-          if (ordfsUrl) {
-            return match.replace(ref, ordfsUrl);
-          }
-        } catch (error) {
-          console.warn(`Could not resolve import ${ref} in ${originalPath}`);
+        if (ordfsUrl) {
+          return match.replace(ref, ordfsUrl);
         }
+      } catch (error) {
+        console.warn(`Could not resolve import ${ref} in ${originalPath}`);
       }
-      return match;
     }
-  );
+    return match;
+  });
 
   return content;
 }

@@ -1,11 +1,11 @@
-import dotenv from "dotenv";
+import dotenv from 'dotenv';
 
 // Load environment variables from .env file (if it exists)
 dotenv.config();
 
-export const ORD_FS_SERVICE_PROVIDER_URL = "https://ordfs.network";
-export const ORDINALS_GORILLA_POOL_URL = "https://ordinals.gorillapool.io";
-export const WOC_API_KEY = "mainnet_c73dca3ffe0187039048c791bae47590";
+export const ORD_FS_SERVICE_PROVIDER_URL = 'https://ordfs.network';
+export const ORDINALS_GORILLA_POOL_URL = 'https://ordinals.gorillapool.io';
+export const WOC_API_KEY = 'mainnet_c73dca3ffe0187039048c791bae47590';
 
 /**
  * Known BSV ordinal content delivery services
@@ -39,8 +39,8 @@ export const DEFAULT_CONFIG = {
   satsPerKb: 1,
 
   // Build settings
-  buildDir: "./dist",
-  manifestFile: "deployment-manifest.json",
+  buildDir: './dist',
+  manifestFile: 'deployment-manifest.json',
   dryRun: false,
 } as const;
 
@@ -50,17 +50,17 @@ export const DEFAULT_CONFIG = {
 function getEnvOrDefault<T>(envKey: string, defaultValue: T): T {
   const envValue = process.env[envKey];
 
-  if (envValue === undefined || envValue === "") {
+  if (envValue === undefined || envValue === '') {
     return defaultValue;
   }
 
   // Handle boolean values
-  if (typeof defaultValue === "boolean") {
-    return (envValue.toLowerCase() === "true") as unknown as T;
+  if (typeof defaultValue === 'boolean') {
+    return (envValue.toLowerCase() === 'true') as unknown as T;
   }
 
   // Handle numeric values
-  if (typeof defaultValue === "number") {
+  if (typeof defaultValue === 'number') {
     const parsed = Number(envValue);
     return (isNaN(parsed) ? defaultValue : parsed) as unknown as T;
   }
@@ -79,21 +79,15 @@ export const config = {
   changeAddress: process.env.CHANGE_ADDRESS,
 
   // Ordinals service configuration
-  ordinalContentUrl: getEnvOrDefault(
-    "ORDINAL_CONTENT_URL",
-    DEFAULT_CONFIG.ordinalContentUrl
-  ),
-  ordinalIndexerUrl: getEnvOrDefault(
-    "ORDINAL_INDEXER_URL",
-    DEFAULT_CONFIG.ordinalIndexerUrl
-  ),
+  ordinalContentUrl: getEnvOrDefault('ORDINAL_CONTENT_URL', DEFAULT_CONFIG.ordinalContentUrl),
+  ordinalIndexerUrl: getEnvOrDefault('ORDINAL_INDEXER_URL', DEFAULT_CONFIG.ordinalIndexerUrl),
   enableServiceResolver: getEnvOrDefault(
-    "ENABLE_SERVICE_RESOLVER",
+    'ENABLE_SERVICE_RESOLVER',
     DEFAULT_CONFIG.enableServiceResolver
   ),
 
   // Transaction settings
-  satsPerKb: getEnvOrDefault("SATS_PER_KB", DEFAULT_CONFIG.satsPerKb),
+  satsPerKb: getEnvOrDefault('SATS_PER_KB', DEFAULT_CONFIG.satsPerKb),
 
   // Versioning options
   appName: process.env.APP_NAME,
@@ -102,25 +96,20 @@ export const config = {
   versioningContract: process.env.VERSIONING_CONTRACT,
 
   // Advanced options
-  buildDir: getEnvOrDefault("BUILD_DIR", DEFAULT_CONFIG.buildDir),
-  manifestFile: getEnvOrDefault("MANIFEST_FILE", DEFAULT_CONFIG.manifestFile),
-  dryRun: getEnvOrDefault("DRY_RUN", DEFAULT_CONFIG.dryRun),
+  buildDir: getEnvOrDefault('BUILD_DIR', DEFAULT_CONFIG.buildDir),
+  manifestFile: getEnvOrDefault('MANIFEST_FILE', DEFAULT_CONFIG.manifestFile),
+  dryRun: getEnvOrDefault('DRY_RUN', DEFAULT_CONFIG.dryRun),
 } as const;
 
 /**
  * Get all known ordinal content services as an array
  * Includes the configured primary service plus all known fallbacks
  */
-export function getAllOrdinalContentServices(
-  primaryService?: string
-): string[] {
+export function getAllOrdinalContentServices(primaryService?: string): string[] {
   const services = new Set<string>();
 
   // Add primary service first (if provided and not default)
-  if (
-    primaryService &&
-    !KNOWN_ORDINAL_CONTENT_SERVICES.includes(primaryService as any)
-  ) {
+  if (primaryService && !KNOWN_ORDINAL_CONTENT_SERVICES.includes(primaryService as any)) {
     services.add(primaryService);
   }
 
@@ -141,10 +130,7 @@ export function getAllOrdinalIndexers(primaryService?: string): string[] {
   const services = new Set<string>();
 
   // Add primary service first (if provided and not default)
-  if (
-    primaryService &&
-    !KNOWN_ORDINAL_INDEXERS.includes(primaryService as any)
-  ) {
+  if (primaryService && !KNOWN_ORDINAL_INDEXERS.includes(primaryService as any)) {
     services.add(primaryService);
   }
 

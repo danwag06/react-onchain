@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+*.tsbuildinfo
+
+# Artifacts
+artifacts
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files
+.env
+.env.*
+
+# Deployment manifests
+deployment-manifest*.json
+
+# Coverage
+coverage
+
+# Templates (preserve exact formatting)
+*.template.js
+
+# Lock files
+package-lock.json
+pnpm-lock.yaml
+yarn.lock

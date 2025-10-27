@@ -41,12 +41,14 @@ async function submitToOrdinalIndexer(txid: string): Promise<void> {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'accept': '*/*',
+        accept: '*/*',
       },
     });
 
     if (response.status !== 204 && response.status !== 200) {
-      console.warn(`Ordinal indexer submission returned status ${response.status} - transaction may not be indexed immediately`);
+      console.warn(
+        `Ordinal indexer submission returned status ${response.status} - transaction may not be indexed immediately`
+      );
     }
   } catch (error) {
     console.warn('Failed to submit to ordinal indexer:', error);
@@ -133,7 +135,9 @@ export async function deployVersioningContract(
     };
   } catch (error) {
     console.error('❌ Failed to deploy versioning contract:', error);
-    throw new Error(`Versioning contract deployment failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Versioning contract deployment failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -182,7 +186,7 @@ export async function updateContractOrigin(
     const currentVersionMap = new HashedMap<ByteString, VersionData>();
 
     const versioning = ReactOnchainVersioning.fromTx(contractTx, vout, {
-      versionMap: currentVersionMap
+      versionMap: currentVersionMap,
     });
     await versioning.connect(signer);
 
@@ -213,7 +217,9 @@ export async function updateContractOrigin(
     await submitToOrdinalIndexer(tx.id);
   } catch (error) {
     console.error(`❌ Failed to update origin:`, error);
-    throw new Error(`Updating origin failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Updating origin failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -266,7 +272,7 @@ export async function addVersionToContract(
     const currentVersionMap = new HashedMap<ByteString, VersionData>();
 
     const versioning = ReactOnchainVersioning.fromTx(contractTx, vout, {
-      versionMap: currentVersionMap
+      versionMap: currentVersionMap,
     });
     await versioning.connect(signer);
 
@@ -311,7 +317,9 @@ export async function addVersionToContract(
     await submitToOrdinalIndexer(tx.id);
   } catch (error) {
     console.error(`❌ Failed to add version to contract:`, error);
-    throw new Error(`Adding version failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Adding version failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -321,9 +329,7 @@ export async function addVersionToContract(
  * @param contractOutpoint - The outpoint of the versioning contract
  * @returns Contract information including origin outpoint and app name
  */
-export async function getContractInfo(
-  contractOutpoint: string
-): Promise<VersioningContractInfo> {
+export async function getContractInfo(contractOutpoint: string): Promise<VersioningContractInfo> {
   try {
     await ReactOnchainVersioning.loadArtifact(artifact);
 
@@ -347,7 +353,7 @@ export async function getContractInfo(
     // Provide empty versionMap for read-only access
     const currentVersionMap = new HashedMap<ByteString, VersionData>();
     const versioning = ReactOnchainVersioning.fromTx(contractTx, vout, {
-      versionMap: currentVersionMap
+      versionMap: currentVersionMap,
     });
 
     // Convert ByteStrings to regular strings
@@ -364,7 +370,9 @@ export async function getContractInfo(
     };
   } catch (error) {
     console.error('Failed to get contract info:', error);
-    throw new Error(`Getting contract info failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Getting contract info failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -374,9 +382,7 @@ export async function getContractInfo(
  * @param contractOutpoint - The outpoint of the versioning contract
  * @returns Array of version strings (newest first, up to last 10)
  */
-export async function getVersionHistory(
-  contractOutpoint: string
-): Promise<string[]> {
+export async function getVersionHistory(contractOutpoint: string): Promise<string[]> {
   try {
     await ReactOnchainVersioning.loadArtifact(artifact);
 
@@ -400,7 +406,7 @@ export async function getVersionHistory(
     // Provide empty versionMap for read-only access
     const currentVersionMap = new HashedMap<ByteString, VersionData>();
     const versioning = ReactOnchainVersioning.fromTx(contractTx, vout, {
-      versionMap: currentVersionMap
+      versionMap: currentVersionMap,
     });
 
     // Extract version history (convert ByteString to string)
@@ -417,7 +423,9 @@ export async function getVersionHistory(
     return history;
   } catch (error) {
     console.error('Failed to get version history:', error);
-    throw new Error(`Getting version history failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Getting version history failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -460,7 +468,7 @@ export async function getVersionDetails(
     // Provide empty versionMap for read-only access
     const currentVersionMap = new HashedMap<ByteString, VersionData>();
     const versioning = ReactOnchainVersioning.fromTx(contractTx, vout, {
-      versionMap: currentVersionMap
+      versionMap: currentVersionMap,
     });
 
     // Query the versionMap for this specific version
@@ -479,6 +487,8 @@ export async function getVersionDetails(
     };
   } catch (error) {
     console.error('Failed to get version details:', error);
-    throw new Error(`Getting version details failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Getting version details failed: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
