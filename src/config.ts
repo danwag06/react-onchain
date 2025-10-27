@@ -5,6 +5,7 @@ dotenv.config();
 
 export const ORD_FS_SERVICE_PROVIDER_URL = "https://ordfs.network";
 export const ORDINALS_GORILLA_POOL_URL = "https://ordinals.gorillapool.io";
+export const WOC_API_KEY = "mainnet_c73dca3ffe0187039048c791bae47590";
 
 /**
  * Known BSV ordinal content delivery services

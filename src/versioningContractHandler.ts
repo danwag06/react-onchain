@@ -18,7 +18,8 @@ import {
 } from 'scrypt-ts';
 import { ReactOnchainVersioning, VersionData } from './contracts/reactOnchainVersioning.js';
 import artifact from '../artifacts/reactOnchainVersioning.json' with { type: 'json' };
-import { ORDINALS_GORILLA_POOL_URL } from './config.js';
+import { ORDINALS_GORILLA_POOL_URL, WOC_API_KEY } from './config.js';
+import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
 
 export const VERSIONING_ENABLED = true;
 
@@ -85,27 +86,43 @@ export async function deployVersioningContract(
     // Convert private key
     const scryptPrivKey = convertPrivateKey(paymentKey);
 
-    // Create signer with DefaultProvider (uses WhatsOnChain and other reliable endpoints)
-    const provider = new DefaultProvider({
-      network: bsv.Networks.mainnet,
-    });
-    await provider.connect();
+    // Wrap deployment in retry logic
+    const deployTx = await retryWithBackoff(
+      async () => {
+        console.log('   Connecting to DefaultProvider...');
 
-    const signer = new TestWallet(scryptPrivKey, provider);
+        // Create signer with DefaultProvider (uses WhatsOnChain and other reliable endpoints)
+        const provider = new DefaultProvider({
+          network: bsv.Networks.mainnet,
+          taal: WOC_API_KEY,
+        });
+        await provider.connect();
 
-    // Create contract instance with initial state
-    const versioning = new ReactOnchainVersioning(
-      PubKey(scryptPrivKey.publicKey.toByteString()),
-      toByteString(originOutpoint, true),
-      toByteString(appName, true),
-      new HashedMap<ByteString, VersionData>()
+        const signer = new TestWallet(scryptPrivKey, provider);
+
+        // Create contract instance with initial state
+        const versioning = new ReactOnchainVersioning(
+          PubKey(scryptPrivKey.publicKey.toByteString()),
+          toByteString(originOutpoint, true),
+          toByteString(appName, true),
+          new HashedMap<ByteString, VersionData>()
+        );
+
+        // Connect signer
+        await versioning.connect(signer);
+
+        console.log('   Deploying versioning contract...');
+
+        // Deploy with initial balance (1000 sats to keep it spendable)
+        return await versioning.deploy(1000);
+      },
+      {
+        maxAttempts: 5,
+        initialDelayMs: 3000,
+        maxDelayMs: 60000,
+      },
+      shouldRetryError
     );
-
-    // Connect signer
-    await versioning.connect(signer);
-
-    // Deploy with initial balance (1000 sats to keep it spendable)
-    const deployTx = await versioning.deploy(1000);
 
     // Submit to ordinals indexer so it gets indexed as an ordinal
     await submitToOrdinalIndexer(deployTx.id);
@@ -152,6 +169,7 @@ export async function updateContractOrigin(
     // Create signer with DefaultProvider
     const provider = new DefaultProvider({
       network: bsv.Networks.mainnet,
+      taal: WOC_API_KEY,
     });
     await provider.connect();
 
@@ -235,6 +253,7 @@ export async function addVersionToContract(
     // Create signer with DefaultProvider
     const provider = new DefaultProvider({
       network: bsv.Networks.mainnet,
+      taal: WOC_API_KEY,
     });
     await provider.connect();
 
@@ -318,6 +337,7 @@ export async function getContractInfo(
     // Create a temporary provider to fetch transaction
     const provider = new DefaultProvider({
       network: bsv.Networks.mainnet,
+      taal: WOC_API_KEY,
     });
     await provider.connect();
 
@@ -370,6 +390,7 @@ export async function getVersionHistory(
     // Create provider
     const provider = new DefaultProvider({
       network: bsv.Networks.mainnet,
+      taal: WOC_API_KEY,
     });
     await provider.connect();
 
@@ -429,6 +450,7 @@ export async function getVersionDetails(
     // Create provider
     const provider = new DefaultProvider({
       network: bsv.Networks.mainnet,
+      taal: WOC_API_KEY,
     });
     await provider.connect();
 

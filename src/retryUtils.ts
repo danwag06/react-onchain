@@ -106,7 +106,10 @@ export function shouldRetryError(error: any, attempt: number): boolean {
     lowerMsg.includes('network') ||
     lowerMsg.includes('timeout') ||
     lowerMsg.includes('econnrefused') ||
-    lowerMsg.includes('enotfound')
+    lowerMsg.includes('enotfound') ||
+    lowerMsg.includes('429') ||
+    lowerMsg.includes('too many requests') ||
+    lowerMsg.includes('rate limit')
   ) {
     return true;
   }
