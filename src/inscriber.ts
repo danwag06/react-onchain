@@ -4,6 +4,7 @@ import { createOrdinals, fetchPayUtxos } from 'js-1sat-ord';
 import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
 import { createHash } from 'crypto';
+import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
 
 /**
  * Generates a mock transaction ID for dry-run mode
@@ -109,52 +110,66 @@ export async function inscribeFile(
   // Convert content to base64
   const dataB64 = Buffer.from(fileContent).toString('base64');
 
-  // Get UTXOs for payment
-  let utxos: Utxo[];
+  // Wrap inscription and broadcast in retry logic
+  const { txid, tx, payChange } = await retryWithBackoff(
+    async () => {
+      // Get UTXOs for payment (refetch on each retry unless specific UTXO provided)
+      let utxos: Utxo[];
 
-  if (paymentUtxo) {
-    // Use the provided UTXO (change from previous transaction)
-    utxos = [paymentUtxo];
-  } else {
-    // Fetch UTXOs from the network
-    const paymentAddress = paymentKey.toAddress().toString();
-    utxos = await fetchPayUtxos(paymentAddress);
+      if (paymentUtxo) {
+        // Use the provided UTXO (change from previous transaction)
+        utxos = [paymentUtxo];
+      } else {
+        // Fetch UTXOs from the network (refetches on each retry)
+        const paymentAddress = paymentKey.toAddress().toString();
+        utxos = await fetchPayUtxos(paymentAddress);
 
-    if (!utxos || utxos.length === 0) {
-      throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
-    }
-  }
+        if (!utxos || utxos.length === 0) {
+          throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
+        }
+      }
 
-  // Create the inscription
-  const result = await createOrdinals({
-    utxos,
-    destinations: [
-      {
-        address: destinationAddress,
-        inscription: {
-          dataB64,
-          contentType,
-        },
-      },
-    ],
-    paymentPk: paymentKey,
-    satsPerKb,
-  });
+      // Create the inscription
+      const result = await createOrdinals({
+        utxos,
+        destinations: [
+          {
+            address: destinationAddress,
+            inscription: {
+              dataB64,
+              contentType,
+            },
+          },
+        ],
+        paymentPk: paymentKey,
+        satsPerKb,
+      });
 
-  // Broadcast the transaction to 1Sat Ordinals API
-  const broadcastResult = await broadcast1Sat(result.tx);
+      // Broadcast the transaction to 1Sat Ordinals API
+      const broadcastResult = await broadcast1Sat(result.tx);
 
-  if (broadcastResult.status !== 'success') {
-    throw new Error(
-      `Failed to broadcast inscription transaction: ${broadcastResult.description || 'Unknown error'}`
-    );
-  }
+      if (broadcastResult.status !== 'success') {
+        throw new Error(
+          `Failed to broadcast inscription transaction: ${broadcastResult.description || 'Unknown error'}`
+        );
+      }
 
-  const txid = broadcastResult.txid!;
+      return {
+        txid: broadcastResult.txid!,
+        tx: result.tx,
+        payChange: result.payChange,
+      };
+    },
+    {
+      maxAttempts: 5,
+      initialDelayMs: 2000,
+      maxDelayMs: 30000,
+    },
+    shouldRetryError
+  );
 
   // Find the inscription output - it's the 1-sat output to the destination address
   let vout = 0;
-  const tx = result.tx;
 
   for (let i = 0; i < tx.outputs.length; i++) {
     const output = tx.outputs[i];
@@ -177,7 +192,7 @@ export async function inscribeFile(
       url,
       size: fileSize,
     },
-    changeUtxo: result.payChange,
+    changeUtxo: payChange,
   };
 }
 

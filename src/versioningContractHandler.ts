@@ -111,8 +111,6 @@ export async function deployVersioningContract(
     // Deploy with initial balance (1000 sats to keep it spendable)
     const deployTx = await versioning.deploy(1000);
 
-    console.log(`✅ Versioning contract deployed: ${deployTx.id}_0`);
-
     // Submit to ordinals indexer so it gets indexed as an ordinal
     await submitToOrdinalIndexer(deployTx.id, bsv.Networks.mainnet);
 
