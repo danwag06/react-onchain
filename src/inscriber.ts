@@ -70,7 +70,8 @@ export async function inscribeFile(
   content?: string,
   satsPerKb?: number,
   dryRun?: boolean,
-  paymentUtxo?: Utxo
+  paymentUtxo?: Utxo,
+  ordinalContentUrl?: string
 ): Promise<{ inscription: InscribedFile; changeUtxo?: Utxo }> {
   // Read file content (use provided content if available, otherwise read from file)
   let fileContent: string;
@@ -87,7 +88,8 @@ export async function inscribeFile(
   if (dryRun) {
     const mockTxid = generateMockTxid(originalPath);
     const vout = 0;
-    const url = `https://ordfs.network/content/${mockTxid}_${vout}`;
+    const contentUrl = ordinalContentUrl || 'https://ordfs.network/content';
+    const url = `${contentUrl}/${mockTxid}_${vout}`;
 
     // Small delay to simulate network activity
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -164,7 +166,8 @@ export async function inscribeFile(
     }
   }
 
-  const url = `https://ordfs.network/content/${txid}_${vout}`;
+  const contentUrl = ordinalContentUrl || 'https://ordfs.network/content';
+  const url = `${contentUrl}/${txid}_${vout}`;
 
   return {
     inscription: {

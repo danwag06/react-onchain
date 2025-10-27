@@ -57,6 +57,26 @@ export interface DeploymentConfig {
   satsPerKb?: number;
   /** Dry run mode - simulate without broadcasting */
   dryRun?: boolean;
+
+  // Service configuration
+  /** Ordinal content delivery URL */
+  ordinalContentUrl?: string;
+  /** Ordinal indexer API URL for version queries */
+  ordinalIndexerUrl?: string;
+  /** Enable service resolver script injection */
+  enableServiceResolver?: boolean;
+
+  // Versioning options
+  /** Enable versioning for this deployment */
+  enableVersioning?: boolean;
+  /** Version string (e.g., "1.0.0") */
+  version?: string;
+  /** Version description/changelog */
+  versionDescription?: string;
+  /** Existing versioning contract outpoint (txid_vout) */
+  versioningContract?: string;
+  /** App name for new versioning contract */
+  appName?: string;
 }
 
 /**
@@ -73,6 +93,10 @@ export interface DeploymentResult {
   txids: string[];
   /** Total size in bytes */
   totalSize: number;
+  /** Versioning contract outpoint (if versioning enabled) */
+  versioningContract?: string;
+  /** Version deployed (if versioning enabled) */
+  version?: string;
 }
 
 /**
@@ -86,6 +110,12 @@ export interface DeploymentManifest {
   totalCost: number;
   totalSize: number;
   transactions: string[];
+  /** Versioning contract outpoint (if versioning enabled) */
+  versioningContract?: string;
+  /** Version deployed (if versioning enabled) */
+  version?: string;
+  /** Version description/changelog (if versioning enabled) */
+  versionDescription?: string;
 }
 
 /**

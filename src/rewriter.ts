@@ -2,6 +2,10 @@ import { readFile } from 'fs/promises';
 import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
 
+// Script template paths
+const VERSION_REDIRECT_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'versionRedirect.template.js');
+const SERVICE_RESOLVER_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'serviceResolver.template.js');
+
 /**
  * Creates a mapping of original paths to ordfs URLs
  */
@@ -48,6 +52,7 @@ export async function rewriteHtml(
     { regex: /(<source[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
     { regex: /(<video[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
     { regex: /(<audio[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
+    { regex: /(<meta[^>]+content=["'])([^"']+)(["'][^>]*>)/gi, attr: 'content' },
   ];
 
   for (const { regex } of patterns) {
@@ -184,5 +189,105 @@ export async function rewriteFile(
     // For other file types, return as-is (binary files, etc.)
     const buffer = await readFile(filePath);
     return buffer.toString('utf-8');
+  }
+}
+
+/**
+ * Injects service resolver script into HTML content
+ *
+ * @param htmlContent - Original HTML content
+ * @param ordinalsServices - Array of ordinals service URLs
+ * @param primaryService - Primary service URL
+ * @returns Modified HTML with injected script
+ */
+export async function injectServiceResolverScript(
+  htmlContent: string,
+  ordinalsServices: string[],
+  primaryService: string
+): Promise<string> {
+  // Read the service resolver script template
+  let scriptContent: string;
+  try {
+    scriptContent = await readFile(SERVICE_RESOLVER_SCRIPT_PATH, 'utf-8');
+  } catch (error) {
+    console.warn('Could not load service resolver script template:', error);
+    return htmlContent;
+  }
+
+  // Replace placeholders
+  scriptContent = scriptContent
+    .replace(/__ORDINALS_SERVICES__/g, JSON.stringify(ordinalsServices))
+    .replace(/__PRIMARY_SERVICE__/g, primaryService);
+
+  // Inject the script into the <head> section
+  const headMatch = htmlContent.match(/<head[^>]*>/i);
+  if (headMatch) {
+    const headTag = headMatch[0];
+    const insertPosition = headMatch.index! + headTag.length;
+
+    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
+
+    return (
+      htmlContent.substring(0, insertPosition) +
+      injectedScript +
+      htmlContent.substring(insertPosition)
+    );
+  } else {
+    // No <head> tag found, inject at the beginning
+    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
+    return injectedScript + htmlContent;
+  }
+}
+
+/**
+ * Injects version redirect script into HTML content
+ *
+ * @param htmlContent - Original HTML content
+ * @param versioningContractOutpoint - Outpoint of the versioning contract
+ * @param originOutpoint - Original deployment outpoint
+ * @param contractApiServices - Array of contract API service URLs
+ * @param ordinalsServices - Array of ordinals content service URLs
+ * @returns Modified HTML with injected script
+ */
+export async function injectVersionScript(
+  htmlContent: string,
+  versioningContractOutpoint: string,
+  originOutpoint: string,
+  contractApiServices: string[],
+  ordinalsServices: string[]
+): Promise<string> {
+  // Read the version redirect script template
+  let scriptContent: string;
+  try {
+    scriptContent = await readFile(VERSION_REDIRECT_SCRIPT_PATH, 'utf-8');
+  } catch (error) {
+    console.warn('Could not load version redirect script template:', error);
+    return htmlContent;
+  }
+
+  // Replace placeholders
+  scriptContent = scriptContent
+    .replace(/__VERSIONING_CONTRACT_OUTPOINT__/g, versioningContractOutpoint)
+    .replace(/__ORIGIN_OUTPOINT__/g, originOutpoint)
+    .replace(/__CONTRACT_API_SERVICES__/g, JSON.stringify(contractApiServices))
+    .replace(/__ORDINALS_SERVICES__/g, JSON.stringify(ordinalsServices));
+
+  // Inject the script into the <head> section
+  const headMatch = htmlContent.match(/<head[^>]*>/i);
+  if (headMatch) {
+    const headTag = headMatch[0];
+    const insertPosition = headMatch.index! + headTag.length;
+
+    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
+
+    return (
+      htmlContent.substring(0, insertPosition) +
+      injectedScript +
+      htmlContent.substring(insertPosition)
+    );
+  } else {
+    // No <head> tag found, inject at the beginning
+    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
+    return injectedScript + htmlContent;
   }
 }

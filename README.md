@@ -4,7 +4,7 @@
 
 ## Overview
 
-Imagine your React app living forever on the blockchain—no servers, no hosting fees, no downtime. Just pure, permanent, decentralized web.
+Your react application on-chain foreve! No servers, no hosting fees, no downtime. Welcome to the decentralized web.
 
 `react-onchain` makes this a reality. It's a CLI tool that inscribes your entire React application on-chain using the BSV blockchain and [1Sat Ordinals](https://docs.1satordinals.com/readme/introduction). Every file—HTML, CSS, JavaScript, images—becomes an immutable ordinal inscription.
 
@@ -86,21 +86,44 @@ https://ordfs.network/<txid>_<vout>
 
 ## CLI Usage
 
-### Command
+### Commands
 
 ```bash
+# Deploy application
 react-onchain deploy [options]
+
+# Query version history
+react-onchain version:history <contract>
+
+# Get version details
+react-onchain version:info <contract> <version>
+
+# Get contract info
+react-onchain contract:info <contract>
 ```
 
-### Options
+**Note:** For local development/testing, you can run commands directly with node:
 
-| Option                       | Alias | Description                              | Default  |
-| ---------------------------- | ----- | ---------------------------------------- | -------- |
-| `--build-dir <directory>`    | `-b`  | Build directory to deploy                | `./dist` |
-| `--payment-key <wif>`        | `-p`  | Payment private key in WIF format        | Required |
-| `--destination <ordAddress>` | `-d`  | Destination ord address for inscriptions | Required |
-| `--sats-per-kb <number>`     | `-s`  | Satoshis per KB for fees                 | `1`      |
-| `--dry-run`                  |       | Test deployment without broadcasting     | `false`  |
+```bash
+node dist/cli.js deploy [options]
+node dist/cli.js version:history <contract>
+node dist/cli.js version:info <contract> <version>
+node dist/cli.js contract:info <contract>
+```
+
+### Deploy Options
+
+| Option                             | Alias | Description                                  | Default  |
+| ---------------------------------- | ----- | -------------------------------------------- | -------- |
+| `--build-dir <directory>`          | `-b`  | Build directory to deploy                    | `./dist` |
+| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format            | Required |
+| `--destination <ordAddress>`       | `-d`  | Destination ord address for inscriptions     | Required |
+| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                     | `1`      |
+| `--dry-run`                        |       | Test deployment without broadcasting         | `false`  |
+| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")           | Optional |
+| `--version-description <string>`   |       | Changelog or release notes                   | Optional |
+| `--versioning-contract <outpoint>` |       | Existing versioning contract                 | Optional |
+| `--app-name <string>`              |       | Application name for new versioning contract | Optional |
 
 ### Examples
 
@@ -177,6 +200,186 @@ When you redeploy, you get a new URL. Update your DNS or redirect rules to point
 - Traditional hosting: Standard DNS + web server redirect
 
 Each deployment is permanent and accessible at its unique URL—you control which version users see via DNS.
+
+## On-Chain Versioning
+
+Deploy your React app with on-chain version tracking. Users can access specific versions via URL parameters, enabling safe rollbacks and version pinning.
+
+### Features
+
+- **Unlimited Versions**: All versions stored permanently on-chain via smart contract
+- **Version History**: Last 10 versions easily queryable
+- **Version Metadata**: Store changelog/release notes with each version
+- **URL-Based Access**: Simple `?version=X` parameter to access any version
+- **Custom Domains**: Works seamlessly with permanent 301 redirects
+
+### How It Works
+
+1. **First Deployment**: Creates a versioning smart contract on-chain
+2. **Version Script**: Injects a redirect script into your `index.html`
+3. **Version Resolution**: Script queries the contract and redirects to requested version
+4. **Permanent Access**: All versions remain accessible forever
+
+### First Deployment
+
+Deploy your first version and create a versioning contract:
+
+```bash
+npx react-onchain deploy \
+  --build-dir ./dist \
+  --payment-key <WIF> \
+  --destination <ORD_ADDRESS> \
+  --version-tag "1.0.0" \
+  --version-description "Initial release" \
+  --app-name "MyDApp"
+```
+
+**Important**: Save the `versioningContract` value from the deployment manifest—you'll need it for future deployments.
+
+### Subsequent Deployments
+
+Deploy new versions using the existing versioning contract:
+
+```bash
+npx react-onchain deploy \
+  --build-dir ./dist \
+  --payment-key <WIF> \
+  --destination <ORD_ADDRESS> \
+  --version-tag "1.1.0" \
+  --version-description "Added dark mode and bug fixes" \
+  --versioning-contract <CONTRACT_OUTPOINT>
+```
+
+The `<CONTRACT_OUTPOINT>` is the `versioningContract` value from your first deployment's manifest.
+
+### Accessing Versions
+
+Once deployed with versioning enabled:
+
+- **Origin (latest)**: `https://yourdomain.com` or `https://ordfs.network/content/<ORIGIN>`
+- **Latest version**: `https://yourdomain.com?version=latest`
+- **Specific version**: `https://yourdomain.com?version=1.0.0`
+
+### Custom Domain Setup with Versioning
+
+1. Deploy your app with versioning enabled
+2. Note the entry point URL from the deployment manifest
+3. Set up a permanent redirect:
+
+**Cloudflare Example**:
+
+```
+Type: 301 Permanent Redirect
+From: yourdomain.com
+To: https://ordfs.network/content/<ENTRY_POINT_OUTPOINT>
+```
+
+The entry point URL never changes. The injected version script handles routing to specific versions automatically.
+
+### Version Manifest Example
+
+With versioning enabled, your deployment manifest includes versioning information:
+
+```json
+{
+  "timestamp": "2025-10-27T02:00:00.000Z",
+  "entryPoint": "https://ordfs.network/abc123_0",
+  "versioningContract": "xyz789_0",
+  "version": "1.1.0",
+  "files": [...],
+  "totalFiles": 4,
+  "totalCost": 45678,
+  "totalSize": 162130,
+  "transactions": [...]
+}
+```
+
+### Versioning CLI Options
+
+| Option                             | Description                                         | Required |
+| ---------------------------------- | --------------------------------------------------- | -------- |
+| `--version-tag <string>`           | Version identifier (e.g., "1.0.0", "v2.1.3-beta")   | No       |
+| `--version-description <string>`   | Changelog or release notes for this version         | No       |
+| `--versioning-contract <outpoint>` | Existing contract outpoint (for subsequent deploys) | No       |
+| `--app-name <string>`              | Application name (for first deployment)             | No       |
+
+### Best Practices
+
+1. **Semantic Versioning**: Use meaningful version tags like `1.0.0`, `1.1.0`, `2.0.0`
+2. **Descriptive Changelogs**: Include clear version descriptions for users
+3. **Keep Contract Outpoint**: Always save the versioning contract outpoint from your first deployment
+4. **Test Versions**: Deploy to testnet first to verify version switching works correctly
+5. **Document Versions**: Maintain a changelog linking to on-chain versions
+
+### Use Cases
+
+- **Safe Updates**: Deploy new versions without breaking existing integrations
+- **Version Pinning**: Let users lock to specific versions via URL parameters
+- **Rollback Support**: Instantly roll back by updating DNS to point to previous version
+- **Beta Testing**: Deploy beta versions alongside production
+- **Compliance**: Maintain permanent audit trail of all deployed versions
+
+### Querying Version Information
+
+Once you have a versioning contract deployed, you can query version history and details:
+
+**Show version history:**
+
+```bash
+npx react-onchain version:history <CONTRACT_OUTPOINT>
+```
+
+Displays all deployed versions (newest first, up to last 10) with latest version marked.
+
+**Get specific version details:**
+
+```bash
+npx react-onchain version:info <CONTRACT_OUTPOINT> <VERSION>
+```
+
+Shows detailed information for a specific version:
+- Version identifier
+- Outpoint (txid_vout)
+- Full URL to access that version
+- Description/changelog
+- Deployment timestamp
+
+**Get contract information:**
+
+```bash
+npx react-onchain contract:info <CONTRACT_OUTPOINT>
+```
+
+Shows contract details:
+- Contract outpoint
+- Application name
+- Origin outpoint
+- Total versions deployed
+- Latest version
+
+**Example:**
+
+```bash
+# View all versions
+npx react-onchain version:history d8912072...7badf745_0
+
+# Output:
+# 📚 Version History
+#
+# ──────────────────────────────────────────────────────────────────────
+# Version              Status
+# ──────────────────────────────────────────────────────────────────────
+# 2.0.0                (latest)
+# 1.1.0
+# 1.0.0
+# ──────────────────────────────────────────────────────────────────────
+
+# Get details for specific version
+npx react-onchain version:info d8912072...7badf745_0 1.1.0
+
+# Get contract summary
+npx react-onchain contract:info d8912072...7badf745_0
+```
 
 ## Deployment Manifest
 

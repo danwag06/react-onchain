@@ -6,6 +6,10 @@ src/
 # Test app
 test-app/
 
+# Example contract and tests (for reference only)
+tests/
+artifacts/
+
 # Config files
 tsconfig.json
 .eslintrc*
