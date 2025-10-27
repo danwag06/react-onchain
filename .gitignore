@@ -9,6 +9,5 @@ test-app/
 .claude
 
 # Environment variables (may contain sensitive keys)
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example

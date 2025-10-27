@@ -43,3 +43,7 @@ Thumbs.db
 # Misc
 .npmrc
 .claude
+
+.env
+.env.local
+.env.*.local
