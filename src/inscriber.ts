@@ -118,6 +118,7 @@ export async function inscribeFile(
 
       if (paymentUtxo) {
         // Use the provided UTXO (change from previous transaction)
+        console.log(`   Using change UTXO: ${paymentUtxo.txid}:${paymentUtxo.vout} (${paymentUtxo.satoshis} sats)`);
         utxos = [paymentUtxo];
       } else {
         // Fetch UTXOs from the network (refetches on each retry)
@@ -127,6 +128,11 @@ export async function inscribeFile(
         if (!utxos || utxos.length === 0) {
           throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
         }
+
+        console.log(`   Found ${utxos.length} UTXO(s) for ${originalPath}`);
+        utxos.forEach((u, i) => {
+          console.log(`     [${i}] ${u.txid}:${u.vout} (${u.satoshis} sats)`);
+        });
       }
 
       // Create the inscription
@@ -145,14 +151,27 @@ export async function inscribeFile(
         satsPerKb,
       });
 
+      // Log which UTXOs are being spent
+      console.log(`   Spending ${utxos.length} input(s):`);
+      utxos.forEach((u, i) => {
+        console.log(`     Input[${i}]: ${u.txid}:${u.vout} (${u.satoshis} sats)`);
+      });
+
       // Broadcast the transaction to 1Sat Ordinals API
+      console.log(`   Broadcasting transaction for ${originalPath}...`);
       const broadcastResult = await broadcast1Sat(result.tx);
 
       if (broadcastResult.status !== 'success') {
+        const errorMsg = broadcastResult.description || 'Unknown error';
+        console.log(`   ❌ Broadcast failed: ${errorMsg}`);
+
         throw new Error(
-          `Failed to broadcast inscription transaction: ${broadcastResult.description || 'Unknown error'}`
+          `Failed to broadcast inscription transaction for ${originalPath}: ${errorMsg}`
         );
       }
+
+      console.log(`   ✅ Broadcast successful: ${broadcastResult.txid}`);
+
 
       return {
         txid: broadcastResult.txid!,

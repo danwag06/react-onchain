@@ -33,12 +33,8 @@ export interface VersioningContractInfo {
  * Submit a transaction to the ordinals indexer
  * This notifies GorillaPool's indexer to index the transaction as an ordinal
  */
-async function submitToOrdinalIndexer(txid: string, network: bsv.Networks.Network): Promise<void> {
-  const apiBase = network === bsv.Networks.mainnet
-    ? 'https://ordinals.gorillapool.io/api'
-    : 'https://testnet.ordinals.gorillapool.io/api';
-
-  const url = `${apiBase}/tx/${txid}/submit`;
+async function submitToOrdinalIndexer(txid: string): Promise<void> {
+  const url = `${ORDINALS_GORILLA_POOL_URL}/api/tx/${txid}/submit`;
 
   try {
     const response = await fetch(url, {
@@ -112,7 +108,7 @@ export async function deployVersioningContract(
     const deployTx = await versioning.deploy(1000);
 
     // Submit to ordinals indexer so it gets indexed as an ordinal
-    await submitToOrdinalIndexer(deployTx.id, bsv.Networks.mainnet);
+    await submitToOrdinalIndexer(deployTx.id);
 
     // Return contract outpoint
     return {
@@ -196,7 +192,7 @@ export async function updateContractOrigin(
     console.log(`   Transaction ID: ${tx.id}`);
 
     // Submit to ordinals indexer
-    await submitToOrdinalIndexer(tx.id, bsv.Networks.mainnet);
+    await submitToOrdinalIndexer(tx.id);
   } catch (error) {
     console.error(`❌ Failed to update origin:`, error);
     throw new Error(`Updating origin failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -293,7 +289,7 @@ export async function addVersionToContract(
     console.log(`✅ Version ${version} added to contract: ${tx.id}`);
 
     // Submit to ordinals indexer
-    await submitToOrdinalIndexer(tx.id, bsv.Networks.mainnet);
+    await submitToOrdinalIndexer(tx.id);
   } catch (error) {
     console.error(`❌ Failed to add version to contract:`, error);
     throw new Error(`Adding version failed: ${error instanceof Error ? error.message : String(error)}`);
