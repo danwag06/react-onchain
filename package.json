@@ -1,0 +1,44 @@
+{
+  "name": "react-onchain",
+  "version": "1.0.0",
+  "description": "Deploy React applications to BSV blockchain.",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "react-onchain": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "react",
+    "bsv",
+    "ordinals",
+    "blockchain",
+    "deployment"
+  ],
+  "author": "Dan Wagner",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danwag06/react-onchain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/danwag06/react-onchain/issues"
+  },
+  "homepage": "https://github.com/danwag06/react-onchain#readme",
+  "dependencies": {
+    "js-1sat-ord": "^0.1.82",
+    "@bsv/sdk": "^1.1.23",
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.7.0"
+  }
+}

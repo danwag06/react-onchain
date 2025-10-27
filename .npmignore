@@ -1,0 +1,41 @@
+# Source files (compiled versions are in dist/)
+src/
+*.ts
+!*.d.ts
+
+# Test app
+test-app/
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# CI/CD
+.github/
+
+# Build artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+.npmrc
+.claude
