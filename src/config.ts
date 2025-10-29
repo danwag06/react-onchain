@@ -66,7 +66,7 @@ function getEnvOrDefault<T>(envKey: string, defaultValue: T): T {
  */
 export const config = {
   // Deployment credentials
-  paymentKey: process.env.PAYMENT_KEY,
+  paymentKey: process.env.REACT_ONCHAIN_PAYMENT_KEY || process.env.REACT_ONCHAIN_PAYMENT_WIF,
   destinationAddress: process.env.DESTINATION_ADDRESS,
   changeAddress: process.env.CHANGE_ADDRESS,
 

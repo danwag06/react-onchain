@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
 import { rewriteFile, injectVersionScript, injectServiceResolverScript } from './rewriter.js';
@@ -31,6 +32,7 @@ export interface OrchestratorCallbacks {
   onAnalysisComplete?: (fileCount: number) => void;
   onInscriptionStart?: (file: string, current: number, total: number) => void;
   onInscriptionComplete?: (file: string, url: string) => void;
+  onInscriptionSkipped?: (file: string, url: string) => void;
   onVersioningContractStart?: () => void;
   onVersioningContractComplete?: () => void;
   onDeploymentComplete?: (entryPointUrl: string) => void;
@@ -101,7 +103,48 @@ export async function deployToChain(
   let finalVersioningContract = versioningContract;
   let changeUtxo: any = undefined; // Track change from previous transaction
 
-  // Step 1.6: Validate version doesn't already exist (ONLY for subsequent deployments)
+  // Step 1.6: Check manifest for duplicate version (LOCAL CHECK - always run if versioning enabled)
+  // This prevents deploying the same version multiple times locally, which would create
+  // duplicate contracts or waste satoshis on re-inscription
+  const manifestPath = 'deployment-manifest.json';
+  if (enableVersioning && version && existsSync(manifestPath)) {
+    try {
+      const manifestJson = await readFile(manifestPath, 'utf-8');
+      const manifestData = JSON.parse(manifestJson);
+
+      let existingVersions: string[] = [];
+
+      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+        // New format
+        const history = manifestData as DeploymentManifestHistory;
+        existingVersions = history.deployments
+          .map((d) => d.version)
+          .filter((v): v is string => v !== undefined);
+      } else if ('version' in manifestData) {
+        // Old format
+        const manifest = manifestData as DeploymentManifest;
+        if (manifest.version) {
+          existingVersions = [manifest.version];
+        }
+      }
+
+      if (existingVersions.includes(version)) {
+        throw new Error(
+          `Version "${version}" already exists in local manifest.\n` +
+            `  Please use a different version tag (e.g., "${version}.1" or increment the version number).\n` +
+            `  Existing versions: ${existingVersions.join(', ')}`
+        );
+      }
+    } catch (error) {
+      // If error is our duplicate version error, re-throw it
+      if (error instanceof Error && error.message.includes('already exists')) {
+        throw error;
+      }
+      // Otherwise, continue (failed to read manifest - not critical)
+    }
+  }
+
+  // Step 1.7: Validate version doesn't exist in smart contract (ON-CHAIN CHECK - subsequent deployments only)
   // This prevents wasting satoshis on inscription when the version already exists in the contract.
   // Skip this check for:
   //   - First deployments (versioningContract is undefined)
@@ -114,6 +157,45 @@ export async function deployToChain(
       throw new Error(
         `Cannot proceed with deployment: ${error instanceof Error ? error.message : String(error)}`
       );
+    }
+  }
+
+  // Step 1.8: Load previous deployment manifest for cache
+  // This allows us to reuse inscriptions for files that haven't changed
+  // Note: manifestPath already declared above in Step 1.6
+  const previousInscriptions = new Map<string, InscribedFile>();
+
+  if (existsSync(manifestPath)) {
+    try {
+      const manifestJson = await readFile(manifestPath, 'utf-8');
+      const manifestData = JSON.parse(manifestJson);
+
+      // Handle both old (single deployment) and new (history) format
+      let deploymentsToProcess: DeploymentManifest[] = [];
+
+      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+        // New format - use most recent deployment
+        const history = manifestData as DeploymentManifestHistory;
+        if (history.deployments.length > 0) {
+          deploymentsToProcess = [history.deployments[history.deployments.length - 1]];
+        }
+      } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
+        // Old format - single deployment
+        deploymentsToProcess = [manifestData as DeploymentManifest];
+      }
+
+      // Build lookup map from most recent deployment
+      for (const deployment of deploymentsToProcess) {
+        for (const file of deployment.files) {
+          // Only cache if file has contentHash (backward compatibility)
+          if (file.contentHash) {
+            previousInscriptions.set(file.originalPath, file);
+          }
+        }
+      }
+    } catch (error) {
+      // Failed to load previous manifest - continue without cache
+      console.warn('⚠️  Warning: Could not load previous manifest for cache');
     }
   }
 
@@ -136,6 +218,57 @@ export async function deployToChain(
 
     callbacks?.onInscriptionStart?.(filePath, i + 1, order.length);
 
+    // Step 2.1: Check if we can reuse a previous inscription (cache hit)
+    const previousInscription = previousInscriptions.get(filePath);
+    const isIndexHtml = filePath === 'index.html' || filePath.endsWith('/index.html');
+
+    // Always re-inscribe index.html (dynamic script injection)
+    let canReuseInscription = false;
+
+    if (previousInscription && !isIndexHtml) {
+      // Content hash matches - check dependency hash
+      if (previousInscription.contentHash === fileRef.contentHash) {
+        const hasDependencies = fileRef.dependencies.length > 0;
+
+        if (!hasDependencies) {
+          // No dependencies - can safely reuse
+          canReuseInscription = true;
+        } else {
+          // Has dependencies - compute dependency hash
+          const dependencyUrls = fileRef.dependencies
+            .map((dep) => urlMap.get(dep))
+            .filter((url): url is string => url !== undefined)
+            .sort();
+
+          const dependencyHash = createHash('sha256')
+            .update(dependencyUrls.join('|'))
+            .digest('hex');
+
+          // Check if dependency hash matches
+          if (previousInscription.dependencyHash === dependencyHash) {
+            canReuseInscription = true;
+          }
+        }
+      }
+    }
+
+    // If we can reuse, skip inscription and add to urlMap
+    if (canReuseInscription && previousInscription) {
+      inscriptions.push({
+        ...previousInscription,
+        // Keep original contentHash and dependencyHash
+      });
+      urlMap.set(filePath, previousInscription.url);
+      txids.add(previousInscription.txid);
+      totalSize += previousInscription.size;
+
+      // Reset change UTXO since we're not creating a transaction
+      changeUtxo = undefined;
+
+      callbacks?.onInscriptionSkipped?.(filePath, previousInscription.url);
+      continue;
+    }
+
     // Check if this file has dependencies that have been inscribed
     const hasDependencies = fileRef.dependencies.length > 0;
     let content: string | undefined;
@@ -146,7 +279,7 @@ export async function deployToChain(
     }
 
     // Inject scripts into index.html if needed
-    const isIndexHtml = filePath === 'index.html' || filePath.endsWith('/index.html');
+    // Note: isIndexHtml already declared above in cache check section
     if (isIndexHtml) {
       // Read the HTML content if not already read
       if (!content) {
@@ -196,7 +329,25 @@ export async function deployToChain(
       primaryContentUrl
     );
 
-    inscriptions.push(result.inscription);
+    // Compute dependency hash for files with dependencies
+    let dependencyHash: string | undefined;
+    if (hasDependencies) {
+      const dependencyUrls = fileRef.dependencies
+        .map((dep) => urlMap.get(dep))
+        .filter((url): url is string => url !== undefined)
+        .sort();
+
+      dependencyHash = createHash('sha256').update(dependencyUrls.join('|')).digest('hex');
+    }
+
+    // Add hash fields to inscription
+    const inscribedFile: InscribedFile = {
+      ...result.inscription,
+      contentHash: fileRef.contentHash,
+      dependencyHash,
+    };
+
+    inscriptions.push(inscribedFile);
     urlMap.set(filePath, result.inscription.url);
     txids.add(result.inscription.txid);
 
@@ -309,6 +460,8 @@ export async function deployToChain(
     versioningContract: finalVersioningContract,
     version: version,
     versionDescription: versionDescription,
+    buildDir,
+    destinationAddress,
   };
 }
 
@@ -327,6 +480,8 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     versioningContract: result.versioningContract,
     version: result.version,
     versionDescription: result.versionDescription,
+    buildDir: result.buildDir,
+    destinationAddress: result.destinationAddress,
   };
 }
 

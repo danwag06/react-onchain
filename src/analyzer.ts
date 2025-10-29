@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'fs/promises';
 import { join, extname, relative, dirname, resolve } from 'path';
+import { createHash } from 'crypto';
 import type { FileReference, DependencyNode, CONTENT_TYPES } from './types.js';
 
 const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
@@ -180,11 +181,15 @@ async function analyzeFile(filePath: string, baseDir: string): Promise<FileRefer
     }
   });
 
+  // Compute SHA256 hash of original content (before any rewriting)
+  const contentHash = createHash('sha256').update(content).digest('hex');
+
   return {
     originalPath: relativePath,
     absolutePath: filePath,
     contentType: CONTENT_TYPE_MAP[ext] || 'application/octet-stream',
     dependencies,
+    contentHash,
   };
 }
 

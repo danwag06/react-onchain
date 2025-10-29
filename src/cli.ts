@@ -11,7 +11,7 @@ import {
   getVersionHistory,
   getVersionDetails,
 } from './versioningContractHandler.js';
-import { config as envConfig } from './config.js';
+import { config as envConfig, DEFAULT_CONFIG } from './config.js';
 import type { DeploymentConfig, InscribedFile, DeploymentManifestHistory } from './types.js';
 import { readFile } from 'fs/promises';
 
@@ -107,6 +107,87 @@ program
   .option('--app-name <string>', 'Application name for new versioning contract', envConfig.appName)
   .action(async (options) => {
     try {
+      // Step 1: Load previous manifest to get stored configuration
+      const manifestPath = resolve('deployment-manifest.json');
+      let previousConfig: {
+        buildDir?: string;
+        destinationAddress?: string;
+        versioningContract?: string;
+      } = {};
+
+      if (existsSync(manifestPath)) {
+        try {
+          const manifestJson = await readFile(manifestPath, 'utf-8');
+          const manifestData = JSON.parse(manifestJson);
+
+          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+            // New format - use first deployment for origin contract, last for other config
+            const history = manifestData;
+            if (history.deployments.length > 0) {
+              const firstDeployment = history.deployments[0];
+              const lastDeployment = history.deployments[history.deployments.length - 1];
+
+              // Origin versioning contract from first deployment
+              previousConfig.versioningContract = firstDeployment.versioningContract;
+              // Build dir and destination from last deployment
+              previousConfig.buildDir = lastDeployment.buildDir;
+              previousConfig.destinationAddress = lastDeployment.destinationAddress;
+            }
+          } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
+            // Old format - single deployment
+            previousConfig.versioningContract = manifestData.versioningContract;
+            previousConfig.buildDir = manifestData.buildDir;
+            previousConfig.destinationAddress = manifestData.destinationAddress;
+          }
+        } catch (error) {
+          // Failed to load manifest - continue without previous config
+        }
+      }
+
+      // Step 2: Auto-detect build directory if not provided
+      // Check if buildDir was explicitly set (not default)
+      const buildDirExplicitlySet = options.buildDir !== DEFAULT_CONFIG.buildDir;
+
+      if (!buildDirExplicitlySet) {
+        // Try previous manifest first
+        if (previousConfig.buildDir && existsSync(previousConfig.buildDir)) {
+          options.buildDir = previousConfig.buildDir;
+        } else {
+          // Auto-detect common build directories
+          const commonBuildDirs = ['dist', 'build', 'out', '.next/standalone', 'public'];
+          for (const dir of commonBuildDirs) {
+            const fullPath = resolve(dir);
+            if (existsSync(fullPath) && existsSync(resolve(fullPath, 'index.html'))) {
+              options.buildDir = dir;
+              break;
+            }
+          }
+
+          if (!options.buildDir) {
+            console.error(
+              chalk.red(
+                'Error: Could not auto-detect build directory. Please specify with --build-dir'
+              )
+            );
+            console.error(chalk.gray('  Tried: ' + commonBuildDirs.join(', ')));
+            process.exit(1);
+          }
+        }
+      }
+
+      // Step 3: Apply configuration precedence for other options
+      // Order: CLI flag > Previous manifest > Environment variable > Default
+
+      // Destination address
+      if (!options.destination && previousConfig.destinationAddress) {
+        options.destination = previousConfig.destinationAddress;
+      }
+
+      // Versioning contract (use origin from first deployment)
+      if (!options.versioningContract && previousConfig.versioningContract) {
+        options.versioningContract = previousConfig.versioningContract;
+      }
+
       // Validate required options (unless dry-run)
       if (!options.dryRun) {
         if (!options.paymentKey) {
@@ -249,6 +330,18 @@ program
           });
           spinner.start('');
         },
+        onInscriptionSkipped: (file, url) => {
+          const shortUrl = url.split('/').pop() || url;
+          spinner.stopAndPersist({
+            symbol: chalk.blue('↻'),
+            text:
+              chalk.white(file.padEnd(35)) +
+              chalk.gray(' → ') +
+              chalk.cyan(shortUrl) +
+              chalk.gray(' (cached)'),
+          });
+          spinner.start('');
+        },
         onVersioningContractStart: () => {
           spinner.stop();
           console.log(chalk.gray('─'.repeat(70)));
@@ -334,14 +427,14 @@ program
             chalk.gray('                    ') + chalk.gray('Will be enabled on next deployment')
           );
           console.log();
-          console.log(chalk.gray('  💡 To deploy next version with redirect support:'));
+          console.log(chalk.gray('  💡 To deploy next version:'));
           console.log(chalk.cyan(`     npx react-onchain deploy \\`));
-          console.log(chalk.cyan(`       --build-dir ./dist \\`));
-          console.log(chalk.cyan(`       --payment-key <YOUR_WIF_KEY> \\`));
-          console.log(chalk.cyan(`       --destination <YOUR_ORD_ADDRESS> \\`));
           console.log(chalk.cyan(`       --version-tag "2.0.0" \\`));
-          console.log(chalk.cyan(`       --version-description "Added new features" \\`));
-          console.log(chalk.cyan(`       --versioning-contract "${result.versioningContract}"`));
+          console.log(chalk.cyan(`       --version-description "Added new features"`));
+          console.log();
+          console.log(
+            chalk.gray('     (build-dir, destination, and contract are auto-loaded from manifest)')
+          );
         } else {
           // Subsequent deployment - version redirect script was injected
           console.log(chalk.gray('  Version redirect: ') + chalk.green('✓ Enabled'));
@@ -375,10 +468,10 @@ program
 
       // Save manifest with history
       const manifest = generateManifest(result);
-      const manifestPath = options.dryRun
+      const outputManifestPath = options.dryRun
         ? options.manifest.replace('.json', '-dry-run.json')
         : options.manifest;
-      const history = await saveManifestWithHistory(manifest, manifestPath);
+      const history = await saveManifestWithHistory(manifest, outputManifestPath);
 
       // Show deployment count
       const deploymentNum = history.totalDeployments;

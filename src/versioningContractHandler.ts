@@ -167,14 +167,6 @@ export async function addVersionToContract(
         // Load contract artifact
         await ReactOnchainVersioning.loadArtifact(artifact);
 
-        // Parse contract outpoint
-        const [txid, voutStr] = contractOutpoint.split('_');
-        const vout = parseInt(voutStr, 10);
-
-        if (!txid || isNaN(vout)) {
-          throw new Error(`Invalid contract outpoint: ${contractOutpoint}`);
-        }
-
         // Convert private key
         const scryptPrivKey = convertPrivateKey(paymentKey);
 
@@ -184,6 +176,17 @@ export async function addVersionToContract(
         await provider.connect();
 
         const signer = new TestWallet(scryptPrivKey, provider);
+
+        // Fetch the latest contract location using fetchLatestByOrigin
+        // This allows using the origin outpoint and automatically finding the current UTXO
+        const latestUtxo = await indexer.fetchLatestByOrigin(contractOutpoint);
+
+        if (!latestUtxo) {
+          throw new Error(`Could not find contract at origin: ${contractOutpoint}`);
+        }
+
+        const txid = latestUtxo.txId;
+        const vout = latestUtxo.outputIndex;
 
         // Load the existing contract instance from blockchain
         const contractTx = await signer.connectedProvider.getTransaction(txid);

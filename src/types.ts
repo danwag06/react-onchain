@@ -12,6 +12,8 @@ export interface FileReference {
   contentType: string;
   /** Files that this file references */
   dependencies: string[];
+  /** SHA256 hash of original file content (before rewriting) */
+  contentHash: string;
 }
 
 /**
@@ -28,6 +30,10 @@ export interface InscribedFile {
   url: string;
   /** File size in bytes */
   size: number;
+  /** SHA256 hash of original file content (before rewriting) - optional for backward compatibility */
+  contentHash?: string;
+  /** Hash of dependency URLs (for cache invalidation when dependencies change) */
+  dependencyHash?: string;
 }
 
 /**
@@ -99,6 +105,10 @@ export interface DeploymentResult {
   version?: string;
   /** Version description/changelog (if versioning enabled) */
   versionDescription?: string;
+  /** Build directory used */
+  buildDir?: string;
+  /** Destination address used */
+  destinationAddress?: string;
 }
 
 /**
@@ -118,6 +128,10 @@ export interface DeploymentManifest {
   version?: string;
   /** Version description/changelog (if versioning enabled) */
   versionDescription?: string;
+  /** Build directory used for this deployment */
+  buildDir?: string;
+  /** Destination address used for inscriptions */
+  destinationAddress?: string;
 }
 
 /**

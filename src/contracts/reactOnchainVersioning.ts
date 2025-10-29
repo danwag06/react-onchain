@@ -33,7 +33,7 @@ export type VersionData = {
  * - Fully queryable off-chain
  */
 export class ReactOnchainVersioning extends SmartContract {
-  static readonly MAX_HISTORY = 100;
+  static readonly MAX_HISTORY = 10;
 
   @prop()
   readonly owner: PubKey;

@@ -54,6 +54,7 @@ export class GorillaPoolIndexer extends IndexerService {
    * Endpoint: POST /tx
    */
   async broadcastTransaction(rawTxHex: string): Promise<string> {
+    console.log(rawTxHex);
     const url = `${this.baseUrl}/tx`;
 
     try {
