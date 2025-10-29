@@ -44,7 +44,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should deploy contract with initial state', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     expect(versioning.versionCount).to.equal(0n);
     expect(versioning.latestVersion).to.equal(toByteString(''));
@@ -54,7 +54,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should add first version successfully', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const version = toByteString('1.0.0', true);
     const outpoint = toByteString('def456_0', true);
@@ -81,7 +81,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: 0,
           next: {
             instance: nextInstance,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -91,7 +91,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should add multiple versions in sequence', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const versions = [
       {
@@ -142,7 +142,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: i,
           next: {
             instance: nextInstance,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -158,68 +158,9 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
     expect(currentInstance.versionHistory[2]).to.equal(toByteString('1.0.0', true));
   });
 
-  it('should verify version exists', async () => {
-    await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
-
-    const version = toByteString('1.0.0', true);
-    const outpoint = toByteString('xyz789_0', true);
-    const description = toByteString('Test version', true);
-    const timestamp = 12345n;
-
-    // Add version first
-    const nextInstance = versioning.next();
-    nextInstance.versionCount = 1n;
-    nextInstance.latestVersion = version;
-    nextInstance.versionHistory[0] = version;
-    nextInstance.versionMap.set(version, {
-      outpoint,
-      description,
-      timestamp,
-    });
-
-    const { nexts } = await versioning.methods.addVersion(
-      (sigResps) => findSig(sigResps, ownerPrivKey.publicKey),
-      version,
-      outpoint,
-      description,
-      {
-        pubKeyOrAddrToSign: ownerPrivKey.publicKey,
-        lockTime: Number(timestamp),
-        next: {
-          instance: nextInstance,
-          balance: 1000,
-        },
-      } as MethodCallOptions<ReactOnchainVersioning>
-    );
-
-    const currentInstance = nexts[0].instance as ReactOnchainVersioning;
-
-    // Verify version exists
-    const verifyNext = currentInstance.next();
-
-    const callVerify = async () =>
-      currentInstance.methods.verifyVersionExists(
-        version,
-        {
-          outpoint,
-          description,
-          timestamp,
-        },
-        {
-          next: {
-            instance: verifyNext,
-            balance: 1000,
-          },
-        } as MethodCallOptions<ReactOnchainVersioning>
-      );
-
-    await expect(callVerify()).not.to.be.rejected;
-  });
-
   it('should reject adding version with empty version string', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const emptyVersion = toByteString('');
     const outpoint = toByteString('xyz789_0', true);
@@ -238,7 +179,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: 0,
           next: {
             instance: nextInstance,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -248,7 +189,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should reject adding version with empty outpoint', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const version = toByteString('1.0.0', true);
     const emptyOutpoint = toByteString('');
@@ -267,7 +208,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: 0,
           next: {
             instance: nextInstance,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -277,7 +218,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should reject adding duplicate version', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const version = toByteString('1.0.0', true);
     const outpoint1 = toByteString('aaa111_0', true);
@@ -305,7 +246,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
         lockTime: 0,
         next: {
           instance: nextInstance1,
-          balance: 1000,
+          balance: 1,
         },
       } as MethodCallOptions<ReactOnchainVersioning>
     );
@@ -326,7 +267,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: 0,
           next: {
             instance: nextInstance2,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -336,7 +277,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should reject non-owner adding version', async () => {
     await versioning.connect(getDefaultSigner(nonOwnerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     const version = toByteString('1.0.0', true);
     const outpoint = toByteString('xyz789_0', true);
@@ -355,7 +296,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
           lockTime: 0,
           next: {
             instance: nextInstance,
-            balance: 1000,
+            balance: 1,
           },
         } as MethodCallOptions<ReactOnchainVersioning>
       );
@@ -365,7 +306,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
 
   it('should handle version history rolling window (1000+ versions)', async () => {
     await versioning.connect(getDefaultSigner(ownerPrivKey));
-    await versioning.deploy(1000);
+    await versioning.deploy(1);
 
     let currentInstance = versioning;
 
@@ -394,7 +335,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
         lockTime: 0,
         next: {
           instance: nextInstance1,
-          balance: 1000,
+          balance: 1,
         },
       } as MethodCallOptions<ReactOnchainVersioning>
     );
@@ -427,7 +368,7 @@ describe('Test SmartContract `ReactOnchainVersioning`', () => {
         lockTime: 1,
         next: {
           instance: nextInstance2,
-          balance: 1000,
+          balance: 1,
         },
       } as MethodCallOptions<ReactOnchainVersioning>
     );

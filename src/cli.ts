@@ -5,14 +5,15 @@ import { existsSync } from 'fs';
 import { resolve } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { deployToChain, generateManifest, saveManifest } from './orchestrator.js';
+import { deployToChain, generateManifest, saveManifestWithHistory } from './orchestrator.js';
 import {
   getContractInfo,
   getVersionHistory,
   getVersionDetails,
 } from './versioningContractHandler.js';
 import { config as envConfig } from './config.js';
-import type { DeploymentConfig, InscribedFile } from './types.js';
+import type { DeploymentConfig, InscribedFile, DeploymentManifestHistory } from './types.js';
+import { readFile } from 'fs/promises';
 
 const program = new Command();
 
@@ -31,32 +32,30 @@ function formatBytes(bytes: number): string {
  * Display file size summary table
  */
 function displaySummary(inscriptions: InscribedFile[], totalSize: number): void {
-  console.log(chalk.bold('\n📊 Deployment Summary:\n'));
-
-  // Table header
-  console.log(chalk.gray('─'.repeat(70)));
-  console.log(chalk.gray('File'.padEnd(40)) + chalk.gray('Size'.padEnd(15)) + chalk.gray('TXID'));
+  console.log(chalk.bold.white('📄 Inscribed Files'));
   console.log(chalk.gray('─'.repeat(70)));
 
   // File rows
-  inscriptions.forEach((file) => {
+  inscriptions.forEach((file, index) => {
     const fileName =
-      file.originalPath.length > 38 ? '...' + file.originalPath.slice(-35) : file.originalPath;
+      file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
 
-    console.log(
-      chalk.cyan(fileName.padEnd(40)) +
-        chalk.yellow(formatBytes(file.size).padEnd(15)) +
-        chalk.gray(file.txid.slice(0, 12) + '...')
-    );
+    const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
+    const name = chalk.white(fileName.padEnd(35));
+    const size = chalk.yellow(formatBytes(file.size).padEnd(10));
+    const txid = chalk.gray(file.txid.slice(0, 8) + '...');
+
+    console.log(`  ${number}${name} ${size} ${txid}`);
   });
 
   console.log(chalk.gray('─'.repeat(70)));
   console.log(
-    chalk.bold('TOTAL'.padEnd(40)) +
-      chalk.bold.green(formatBytes(totalSize).padEnd(15)) +
-      chalk.bold.gray(`${inscriptions.length} file${inscriptions.length !== 1 ? 's' : ''}`)
+    chalk.gray('  TOTAL'.padEnd(39)) +
+      chalk.bold.green(formatBytes(totalSize).padEnd(11)) +
+      chalk.gray(`${inscriptions.length} file${inscriptions.length !== 1 ? 's' : ''}`)
   );
-  console.log(chalk.gray('─'.repeat(70)) + '\n');
+  console.log(chalk.gray('─'.repeat(70)));
+  console.log();
 }
 
 program
@@ -144,30 +143,57 @@ program
         process.exit(1);
       }
 
-      console.log(chalk.bold('\n🚀 React OnChain Deployment\n'));
+      // Beautiful header
+      console.log();
+      console.log(
+        chalk.cyan('╔═══════════════════════════════════════════════════════════════════╗')
+      );
+      console.log(
+        chalk.cyan('║') +
+          chalk.bold.white('             🚀 React OnChain Deployment              ').padEnd(67) +
+          chalk.cyan('║')
+      );
+      console.log(
+        chalk.cyan('║') +
+          chalk.gray('          Deploy your React app to the BSV blockchain        ').padEnd(67) +
+          chalk.cyan('║')
+      );
+      console.log(
+        chalk.cyan('╚═══════════════════════════════════════════════════════════════════╝')
+      );
+      console.log();
 
       if (options.dryRun) {
-        console.log(chalk.yellow.bold('⚠️  DRY RUN MODE - No transactions will be broadcast\n'));
+        console.log(
+          chalk.yellow.bold('⚠️  DRY RUN MODE') +
+            chalk.yellow(' - No transactions will be broadcast\n')
+        );
       }
 
-      console.log(chalk.gray(`Build directory: ${buildDir}`));
-      console.log(chalk.gray(`Destination: ${options.destination}`));
-      console.log(chalk.gray(`Fee rate: ${options.satsPerKb} sats/KB`));
+      // Configuration section
+      console.log(chalk.bold.white('📋 Configuration'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('  Build directory: ') + chalk.cyan(buildDir));
+      console.log(chalk.gray('  Destination:     ') + chalk.cyan(options.destination));
+      console.log(chalk.gray('  Fee rate:        ') + chalk.cyan(`${options.satsPerKb} sats/KB`));
 
       // Display versioning info if enabled
       if (options.versionTag) {
-        console.log(chalk.gray(`Version: ${options.versionTag}`));
+        console.log(chalk.gray('  Version:         ') + chalk.magenta(options.versionTag));
         if (options.versionDescription) {
-          console.log(chalk.gray(`Description: ${options.versionDescription}`));
+          console.log(chalk.gray('  Description:     ') + chalk.white(options.versionDescription));
         }
         if (options.versioningContract) {
-          console.log(chalk.gray(`Versioning contract: ${options.versioningContract}`));
+          console.log(chalk.gray('  Contract:        ') + chalk.yellow(options.versioningContract));
         } else if (options.appName) {
           console.log(
-            chalk.gray(`App name: ${options.appName} (new versioning contract will be created)`)
+            chalk.gray('  App name:        ') +
+              chalk.green(options.appName) +
+              chalk.gray(' (new contract)')
           );
         }
       }
+      console.log(chalk.gray('─'.repeat(70)));
       console.log();
 
       // Determine if service resolver should be enabled
@@ -192,79 +218,220 @@ program
         appName: options.appName,
       };
 
-      let spinner = ora('Analyzing build directory...').start();
-      let fileCount = 0;
-      let currentFile = '';
+      let spinner = ora({ text: 'Analyzing build directory...', color: 'cyan' }).start();
 
       const result = await deployToChain(config, {
         onAnalysisStart: () => {
-          spinner.text = 'Analyzing build directory...';
+          spinner.text = '🔍 Analyzing build directory...';
         },
         onAnalysisComplete: (count) => {
-          fileCount = count;
-          spinner.succeed(chalk.green(`Found ${count} files to inscribe`));
-          spinner = ora('Inscribing files...').start();
+          spinner.succeed(chalk.bold.green(`Found ${chalk.white(count)} files to inscribe`));
+          console.log();
+          console.log(chalk.bold.white('⚡ Inscribing to BSV Blockchain'));
+          console.log(chalk.gray('─'.repeat(70)));
+          spinner = ora({ text: 'Preparing inscription...', color: 'yellow' }).start();
         },
         onInscriptionStart: (file, current, total) => {
-          currentFile = file;
-          spinner.text = `Inscribing ${chalk.cyan(file)} (${current}/${total})`;
+          const percent = Math.round((current / total) * 100);
+          const progressBar =
+            '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+          spinner.text =
+            chalk.yellow(`[${progressBar}] ${percent}%`) +
+            chalk.gray(` Inscribing `) +
+            chalk.cyan(file) +
+            chalk.gray(` (${current}/${total})`);
         },
         onInscriptionComplete: (file, url) => {
-          spinner.succeed(chalk.green(`✓ ${file}`) + chalk.gray(` → ${url}`));
-          spinner = ora('Inscribing files...').start();
+          const shortUrl = url.split('/').pop() || url;
+          spinner.stopAndPersist({
+            symbol: chalk.green('✓'),
+            text: chalk.white(file.padEnd(35)) + chalk.gray(' → ') + chalk.cyan(shortUrl),
+          });
+          spinner.start('');
         },
-        onDeploymentComplete: (entryPointUrl) => {
+        onVersioningContractStart: () => {
           spinner.stop();
+          console.log(chalk.gray('─'.repeat(70)));
+          console.log();
+          spinner = ora({
+            text: chalk.magenta('Deploying versioning contract...'),
+            color: 'magenta',
+          }).start();
+        },
+        onVersioningContractComplete: () => {
+          spinner.succeed(chalk.green('Versioning contract deployed'));
+        },
+        onDeploymentComplete: () => {
+          spinner.stop();
+          console.log(chalk.gray('─'.repeat(70)));
         },
       });
 
-      console.log(chalk.bold('\n✨ Deployment Complete!\n'));
+      // Success banner
+      console.log();
+      console.log(
+        chalk.green('╔═══════════════════════════════════════════════════════════════════╗')
+      );
+      console.log(
+        chalk.green('║') +
+          chalk.bold
+            .white('              ✨ Deployment Complete! ✨                  ')
+            .padEnd(67) +
+          chalk.green('║')
+      );
+      console.log(
+        chalk.green('╚═══════════════════════════════════════════════════════════════════╝')
+      );
+      console.log();
 
       if (options.dryRun) {
-        console.log(chalk.yellow.bold('⚠️  DRY RUN - Mock transaction IDs shown below:\n'));
+        console.log(
+          chalk.yellow.bold('⚠️  DRY RUN') + chalk.yellow(' - Mock transaction IDs shown below\n')
+        );
       }
 
       // Display file size summary
       displaySummary(result.inscriptions, result.totalSize);
 
-      console.log(chalk.green(`Entry Point: ${chalk.bold(result.entryPointUrl)}\n`));
-      console.log(chalk.gray(`Total files: ${result.inscriptions.length}`));
-      console.log(chalk.gray(`Total size: ${formatBytes(result.totalSize)}`));
-      console.log(chalk.gray(`Total cost: ~${result.totalCost} satoshis`));
-      console.log(chalk.gray(`Transactions: ${result.txids.length}`));
+      // Entry point section
+      console.log(chalk.bold.white('🌐 Entry Point'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.cyan.bold(`  ${result.entryPointUrl}`));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log();
+
+      // Stats section
+      console.log(chalk.bold.white('📊 Deployment Stats'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('  Total files:      ') + chalk.white(result.inscriptions.length));
+      console.log(chalk.gray('  Total size:       ') + chalk.white(formatBytes(result.totalSize)));
+      console.log(
+        chalk.gray('  Total cost:       ') + chalk.white(`~${result.totalCost} satoshis`)
+      );
+      console.log(chalk.gray('  Transactions:     ') + chalk.white(result.txids.length));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log();
 
       // Display versioning information if available
       if (result.versioningContract) {
-        console.log();
-        console.log(chalk.bold.cyan('📦 Versioning Information:'));
-        console.log(chalk.gray(`Contract: ${result.versioningContract}`));
+        console.log(chalk.bold.magenta('📦 Versioning'));
+        console.log(chalk.gray('─'.repeat(70)));
+        console.log(chalk.gray('  Contract:         ') + chalk.yellow(result.versioningContract));
         if (result.version) {
-          console.log(chalk.gray(`Version: ${result.version}`));
+          console.log(chalk.gray('  Version:          ') + chalk.magenta(result.version));
         }
-        console.log(chalk.gray(`\nAccess versions via: ${result.entryPointUrl}?version=<VERSION>`));
-      }
-      console.log();
 
-      // Save manifest
+        // Check if this is a first deployment (no --versioning-contract provided)
+        const isFirstDeployment = !options.versioningContract;
+
+        if (isFirstDeployment) {
+          // First deployment - no version redirect script injected
+          console.log(
+            chalk.gray('  Version redirect: ') +
+              chalk.yellow('Not available yet (first deployment)')
+          );
+          console.log(
+            chalk.gray('                    ') + chalk.gray('Will be enabled on next deployment')
+          );
+          console.log();
+          console.log(chalk.gray('  💡 To deploy next version with redirect support:'));
+          console.log(chalk.cyan(`     npx react-onchain deploy \\`));
+          console.log(chalk.cyan(`       --build-dir ./dist \\`));
+          console.log(chalk.cyan(`       --payment-key <YOUR_WIF_KEY> \\`));
+          console.log(chalk.cyan(`       --destination <YOUR_ORD_ADDRESS> \\`));
+          console.log(chalk.cyan(`       --version-tag "2.0.0" \\`));
+          console.log(chalk.cyan(`       --version-description "Added new features" \\`));
+          console.log(chalk.cyan(`       --versioning-contract "${result.versioningContract}"`));
+        } else {
+          // Subsequent deployment - version redirect script was injected
+          console.log(chalk.gray('  Version redirect: ') + chalk.green('✓ Enabled'));
+          console.log(
+            chalk.gray('  Version access:   ') +
+              chalk.cyan(`${result.entryPointUrl}?version=<VERSION>`)
+          );
+        }
+
+        console.log(chalk.gray('─'.repeat(70)));
+        console.log();
+
+        // Show available query commands
+        console.log(chalk.bold.white('📋 Available Queries'));
+        console.log(chalk.gray('─'.repeat(70)));
+        console.log(
+          chalk.gray('  • Version history:   ') +
+            chalk.cyan(`npx react-onchain version:history ${result.versioningContract}`)
+        );
+        console.log(
+          chalk.gray('  • Version details:   ') +
+            chalk.cyan(`npx react-onchain version:info ${result.versioningContract} <VERSION>`)
+        );
+        console.log(
+          chalk.gray('  • Contract info:     ') +
+            chalk.cyan(`npx react-onchain contract:info ${result.versioningContract}`)
+        );
+        console.log(chalk.gray('─'.repeat(70)));
+        console.log();
+      }
+
+      // Save manifest with history
       const manifest = generateManifest(result);
       const manifestPath = options.dryRun
         ? options.manifest.replace('.json', '-dry-run.json')
         : options.manifest;
-      await saveManifest(manifest, manifestPath);
-      console.log(chalk.gray(`Manifest saved to: ${manifestPath}\n`));
+      const history = await saveManifestWithHistory(manifest, manifestPath);
+
+      // Show deployment count
+      const deploymentNum = history.totalDeployments;
+      if (deploymentNum === 1) {
+        console.log(chalk.gray(`📄 Manifest saved to: ${manifestPath}`));
+      } else {
+        console.log(
+          chalk.gray(`📄 Manifest saved to: ${manifestPath} `) +
+            chalk.cyan(`(Deployment #${deploymentNum})`)
+        );
+      }
+      console.log();
 
       if (options.dryRun) {
         console.log(
-          chalk.yellow.bold('📋 This was a dry run. To deploy for real, remove --dry-run flag.\n')
+          chalk.yellow('╭─────────────────────────────────────────────────────────────────────╮')
         );
-      } else {
-        console.log(chalk.bold('🌐 Your app is now live on the blockchain!'));
         console.log(
-          chalk.gray(
-            '⏱️  Note: It may take up to 1 confirmation (~10 minutes) for your app to be fully accessible.\n'
-          )
+          chalk.yellow('│') +
+            chalk.yellow
+              .bold('  This was a dry run. To deploy for real, remove --dry-run flag.  ')
+              .padEnd(68) +
+            chalk.yellow('│')
         );
-        console.log(chalk.cyan(`Visit: ${result.entryPointUrl}\n`));
+        console.log(
+          chalk.yellow('╰─────────────────────────────────────────────────────────────────────╯')
+        );
+        console.log();
+      } else {
+        console.log(
+          chalk.green('╭─────────────────────────────────────────────────────────────────────╮')
+        );
+        console.log(
+          chalk.green('│') +
+            chalk.bold
+              .white('         🎉 Your app is now live on the blockchain! 🎉          ')
+              .padEnd(68) +
+            chalk.green('│')
+        );
+        console.log(chalk.green('│') + ''.padEnd(69) + chalk.green('│'));
+        console.log(
+          chalk.green('│') +
+            chalk
+              .gray('  ⏱️  Note: It may take ~10 minutes for full confirmation           ')
+              .padEnd(68) +
+            chalk.green('│')
+        );
+        console.log(
+          chalk.green('╰─────────────────────────────────────────────────────────────────────╯')
+        );
+        console.log();
+        console.log(chalk.bold.cyan('  🔗 Visit: ') + chalk.cyan.underline(result.entryPointUrl));
+        console.log();
       }
     } catch (error) {
       console.error(chalk.red('\n❌ Deployment failed:\n'));
@@ -290,14 +457,22 @@ program
       spinner.succeed(chalk.green(`Found ${history.length} version(s)`));
 
       console.log(chalk.gray('─'.repeat(70)));
-      console.log(chalk.gray('Version'.padEnd(20)) + chalk.gray('Status'));
+      console.log(
+        chalk.gray('Version'.padEnd(15)) +
+          chalk.gray('Description'.padEnd(40)) +
+          chalk.gray('Status')
+      );
       console.log(chalk.gray('─'.repeat(70)));
 
       for (let i = 0; i < history.length; i++) {
-        const version = history[i];
+        const { version, description } = history[i];
         const isLatest = i === 0;
         const status = isLatest ? chalk.green('(latest)') : '';
-        console.log(chalk.cyan(version.padEnd(20)) + status);
+        const truncatedDesc =
+          description.length > 37 ? description.substring(0, 34) + '...' : description;
+        console.log(
+          chalk.cyan(version.padEnd(15)) + chalk.white(truncatedDesc.padEnd(40)) + status
+        );
       }
 
       console.log(chalk.gray('─'.repeat(70)));
@@ -369,12 +544,96 @@ program
       console.log(chalk.bold('Total Versions:') + ` ${history.length}`);
       console.log(
         chalk.bold('Latest Version:') +
-          ` ${history.length > 0 ? chalk.cyan(history[0]) : chalk.gray('(none)')}`
+          ` ${history.length > 0 ? chalk.cyan(history[0].version) : chalk.gray('(none)')}`
       );
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to get contract info:\n'));
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+// Manifest history command
+program
+  .command('manifest:history')
+  .description('Show local deployment history from manifest file')
+  .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
+  .action(async (options) => {
+    try {
+      const manifestPath = resolve(options.manifest);
+
+      if (!existsSync(manifestPath)) {
+        console.error(chalk.red(`\n❌ Manifest file not found: ${manifestPath}\n`));
+        process.exit(1);
+      }
+
+      const spinner = ora('Loading deployment history...').start();
+
+      const data = await readFile(manifestPath, 'utf-8');
+      const parsed = JSON.parse(data);
+
+      // Check format
+      if (!('manifestVersion' in parsed && 'deployments' in parsed)) {
+        spinner.fail(chalk.yellow('Old manifest format detected'));
+        console.log(chalk.yellow('\nThis manifest uses the old single-deployment format.'));
+        console.log(chalk.gray('Deploy again to migrate to the new history-tracking format.\n'));
+        process.exit(0);
+      }
+
+      const history = parsed as DeploymentManifestHistory;
+      spinner.succeed(chalk.green(`Found ${history.totalDeployments} deployment(s)`));
+
+      console.log(chalk.bold('\n📚 Deployment History\n'));
+      console.log(chalk.gray('─'.repeat(70)));
+
+      // Show header
+      console.log(
+        chalk.gray('#'.padEnd(4)) +
+          chalk.gray('Version'.padEnd(12)) +
+          chalk.gray('Timestamp'.padEnd(22)) +
+          chalk.gray('Files'.padEnd(8)) +
+          chalk.gray('Size')
+      );
+      console.log(chalk.gray('─'.repeat(70)));
+
+      // Show each deployment
+      history.deployments.forEach((deployment, index) => {
+        const num = String(index + 1).padEnd(4);
+        const version = (deployment.version || 'N/A').padEnd(12);
+        const timestamp = new Date(deployment.timestamp).toLocaleString().padEnd(22);
+        const files = String(deployment.totalFiles).padEnd(8);
+        const size = formatBytes(deployment.totalSize);
+
+        const isLatest = index === history.deployments.length - 1;
+        const latestLabel = isLatest ? chalk.green(' (latest)') : '';
+
+        console.log(
+          chalk.cyan(num) +
+            chalk.white(version) +
+            chalk.gray(timestamp) +
+            chalk.white(files) +
+            chalk.yellow(size) +
+            latestLabel
+        );
+      });
+
+      console.log(chalk.gray('─'.repeat(70)));
+
+      // Show summary
+      const totalCost = history.deployments.reduce((sum, d) => sum + d.totalCost, 0);
+      const totalSize = history.deployments.reduce((sum, d) => sum + d.totalSize, 0);
+      console.log(chalk.gray(`\nTotal deployments: ${history.totalDeployments}`));
+      console.log(chalk.gray(`Total cost: ~${totalCost} satoshis`));
+      console.log(chalk.gray(`Total size: ${formatBytes(totalSize)}`));
+
+      if (history.versioningContract) {
+        console.log(chalk.gray(`Versioning contract: ${history.versioningContract}`));
+      }
+      console.log();
+    } catch (error) {
+      console.error(chalk.red('\n❌ Failed to read manifest history:\n'));
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }

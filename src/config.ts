@@ -1,38 +1,30 @@
 import dotenv from 'dotenv';
+import { GorillaPoolIndexer } from './services/gorilla-pool/indexer.js';
+import { GorillaPoolBrowserConfig } from './services/gorilla-pool/browserConfig.js';
+import type { IndexerService, BrowserIndexerConfig } from './services/IndexerService.js';
 
 // Load environment variables from .env file (if it exists)
 dotenv.config();
 
-export const ORD_FS_SERVICE_PROVIDER_URL = 'https://ordfs.network';
-export const ORDINALS_GORILLA_POOL_URL = 'https://ordinals.gorillapool.io';
-export const WOC_API_KEY = 'mainnet_c73dca3ffe0187039048c791bae47590';
-
 /**
- * Known BSV ordinal content delivery services
- * These services provide access to inscribed content via outpoints
+ * Browser-compatible indexer configurations
+ * Contributors can add new indexers by creating a new IndexerService class
+ * with a corresponding BrowserIndexerConfig export, then adding it here.
  */
-export const KNOWN_ORDINAL_CONTENT_SERVICES = [
-  `${ORD_FS_SERVICE_PROVIDER_URL}/content`,
-  `${ORDINALS_GORILLA_POOL_URL}/content`,
-  // Add more known services as they become available
-] as const;
-
-/**
- * Known ordinal indexer APIs for version queries
- * These services provide APIs to query smart contract state
- */
-export const KNOWN_ORDINAL_INDEXERS = [
-  `${ORDINALS_GORILLA_POOL_URL}/api`,
-  // Add more known services as they become available
+export const BROWSER_INDEXER_CONFIGS: ReadonlyArray<BrowserIndexerConfig> = [
+  GorillaPoolBrowserConfig,
+  // Add more browser configs as new indexers are contributed
+  // Example: WhatsOnChainBrowserConfig, BlockchairBrowserConfig, etc.
 ] as const;
 
 /**
  * Default configuration values
+ * Uses the first (primary) browser indexer config as the default
  */
 export const DEFAULT_CONFIG = {
-  // Ordinals service configuration
-  ordinalContentUrl: `${ORD_FS_SERVICE_PROVIDER_URL}/content`,
-  ordinalIndexerUrl: `${ORDINALS_GORILLA_POOL_URL}/api`,
+  // Ordinals service configuration (from primary indexer)
+  ordinalContentUrl: BROWSER_INDEXER_CONFIGS[0].contentUrl,
+  ordinalIndexerUrl: BROWSER_INDEXER_CONFIGS[0].baseUrl,
   enableServiceResolver: true,
 
   // Transaction settings
@@ -103,42 +95,45 @@ export const config = {
 
 /**
  * Get all known ordinal content services as an array
- * Includes the configured primary service plus all known fallbacks
+ * Extracts content URLs from all available indexer configurations
  */
 export function getAllOrdinalContentServices(primaryService?: string): string[] {
   const services = new Set<string>();
 
-  // Add primary service first (if provided and not default)
-  if (primaryService && !KNOWN_ORDINAL_CONTENT_SERVICES.includes(primaryService as any)) {
-    services.add(primaryService);
-  }
-
-  // Add configured service
+  // Add configured service first
   services.add(config.ordinalContentUrl);
 
-  // Add all known services
-  KNOWN_ORDINAL_CONTENT_SERVICES.forEach((service) => services.add(service));
+  // Extract content URLs from all indexer configs
+  BROWSER_INDEXER_CONFIGS.forEach((config) => services.add(config.contentUrl));
+
+  // Add custom primary service if provided
+  if (primaryService && !services.has(primaryService)) {
+    services.add(primaryService);
+  }
 
   return Array.from(services);
 }
 
 /**
- * Get all known ordinal indexer APIs as an array
- * Includes the configured primary service plus all known fallbacks
+ * Get all available indexer configurations for browser use
+ * Returns browser-compatible indexer configs that include endpoint construction logic
+ *
+ * @returns Array of BrowserIndexerConfig objects
  */
-export function getAllOrdinalIndexers(primaryService?: string): string[] {
-  const services = new Set<string>();
+export function getAllIndexerConfigs(): BrowserIndexerConfig[] {
+  return [...BROWSER_INDEXER_CONFIGS];
+}
 
-  // Add primary service first (if provided and not default)
-  if (primaryService && !KNOWN_ORDINAL_INDEXERS.includes(primaryService as any)) {
-    services.add(primaryService);
-  }
+/**
+ * Create an IndexerService instance
+ *
+ * @param url - Optional custom indexer URL (defaults to GorillaPool)
+ * @returns IndexerService instance
+ */
+export function createIndexer(url?: string): IndexerService {
+  const indexerUrl = url || config.ordinalIndexerUrl;
 
-  // Add configured service
-  services.add(config.ordinalIndexerUrl);
-
-  // Add all known services
-  KNOWN_ORDINAL_INDEXERS.forEach((service) => services.add(service));
-
-  return Array.from(services);
+  // For now, we only have GorillaPoolIndexer
+  // In the future, we could detect the service type from URL or add more implementations
+  return new GorillaPoolIndexer(indexerUrl);
 }

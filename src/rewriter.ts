@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
+import type { BrowserIndexerConfig } from './services/IndexerService.js';
 
 // Script template paths
 const VERSION_REDIRECT_SCRIPT_PATH = join(
@@ -10,6 +11,10 @@ const VERSION_REDIRECT_SCRIPT_PATH = join(
 const SERVICE_RESOLVER_SCRIPT_PATH = join(
   import.meta.dirname || __dirname,
   'serviceResolver.template.js'
+);
+const CONTRACT_ARTIFACT_PATH = join(
+  import.meta.dirname || __dirname,
+  '../artifacts/contracts/reactOnchainVersioning.json'
 );
 
 /**
@@ -248,16 +253,14 @@ export async function injectServiceResolverScript(
  *
  * @param htmlContent - Original HTML content
  * @param versioningContractOutpoint - Outpoint of the versioning contract
- * @param originOutpoint - Original deployment outpoint
- * @param contractApiServices - Array of contract API service URLs
+ * @param indexerConfigs - Array of browser-compatible indexer configurations
  * @param ordinalsServices - Array of ordinals content service URLs
  * @returns Modified HTML with injected script
  */
 export async function injectVersionScript(
   htmlContent: string,
   versioningContractOutpoint: string,
-  originOutpoint: string,
-  contractApiServices: string[],
+  indexerConfigs: BrowserIndexerConfig[],
   ordinalsServices: string[]
 ): Promise<string> {
   // Read the version redirect script template
@@ -269,12 +272,35 @@ export async function injectVersionScript(
     return htmlContent;
   }
 
-  // Replace placeholders
+  // Read the contract artifact JSON
+  let artifactJson: string;
+  try {
+    artifactJson = await readFile(CONTRACT_ARTIFACT_PATH, 'utf-8');
+  } catch (error) {
+    console.warn('Could not load contract artifact:', error);
+    return htmlContent;
+  }
+
+  // Serialize browser indexer configs
+  // Functions need to be converted to strings and reconstructed in browser
+  const serializedConfigs = indexerConfigs.map((config) => ({
+    name: config.name,
+    baseUrl: config.baseUrl,
+    endpoints: {
+      fetchLatestByOrigin: config.endpoints.fetchLatestByOrigin.toString(),
+      getTransaction: config.endpoints.getTransaction.toString(),
+    },
+    parseLatestByOrigin: config.parseLatestByOrigin
+      ? config.parseLatestByOrigin.toString()
+      : undefined,
+  }));
+
+  // Replace placeholders (note: use single replace to avoid issues with global replace)
   scriptContent = scriptContent
-    .replace(/__VERSIONING_CONTRACT_OUTPOINT__/g, versioningContractOutpoint)
-    .replace(/__ORIGIN_OUTPOINT__/g, originOutpoint)
-    .replace(/__CONTRACT_API_SERVICES__/g, JSON.stringify(contractApiServices))
-    .replace(/__ORDINALS_SERVICES__/g, JSON.stringify(ordinalsServices));
+    .replace('VERSIONING_CONTRACT_OUTPOINT_PLACEHOLDER', versioningContractOutpoint)
+    .replace('CONTRACT_ARTIFACT_PLACEHOLDER', artifactJson)
+    .replace('INDEXER_CONFIGS_PLACEHOLDER', JSON.stringify(serializedConfigs))
+    .replace('ORDINALS_SERVICES_PLACEHOLDER', JSON.stringify(ordinalsServices));
 
   // Inject the script into the <head> section
   const headMatch = htmlContent.match(/<head[^>]*>/i);

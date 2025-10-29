@@ -15,7 +15,10 @@
     "declarationMap": true,
     "sourceMap": true,
     "experimentalDecorators": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "scrypt-ord": ["./src/scrypt-ord.d.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

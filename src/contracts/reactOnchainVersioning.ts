@@ -2,7 +2,6 @@ import {
   assert,
   ByteString,
   hash256,
-  HashedMap,
   method,
   prop,
   PubKey,
@@ -22,35 +21,36 @@ export type VersionData = {
 /**
  * ReactOnchainVersioning - On-chain version tracking for React applications
  *
- * This contract maintains an unlimited version history using HashedMap storage
- * with a rolling window of the last 10 versions for efficient history queries.
+ * This contract maintains version history with full metadata storage
+ * for up to 100 versions in a rolling window.
  *
  * Features:
- * - Unlimited version storage via HashedMap
- * - Last 10 versions in ordered history
+ * - Up to 100 versions with full metadata
+ * - Ordered history (newest first)
  * - Per-version metadata (outpoint, description, timestamp)
- * - Immutable origin outpoint
+ * - Immutable origin outpoint (set at deployment)
  * - Single owner authorization
+ * - Fully queryable off-chain
  */
 export class ReactOnchainVersioning extends SmartContract {
-  static readonly MAX_HISTORY = 10;
+  static readonly MAX_HISTORY = 100;
 
   @prop()
   readonly owner: PubKey;
 
-  @prop(true)
-  originOutpoint: ByteString;
+  @prop()
+  readonly originOutpoint: ByteString;
 
   @prop()
   readonly appName: ByteString;
 
-  // Unlimited version storage
+  // Ordered history of last 100 versions (newest first)
   @prop(true)
-  versionMap: HashedMap<ByteString, VersionData>;
+  versionHistory: FixedArray<VersionData, typeof ReactOnchainVersioning.MAX_HISTORY>;
 
-  // Ordered history of last 10 versions (newest first)
+  // Version strings for quick lookup (newest first)
   @prop(true)
-  versionHistory: FixedArray<ByteString, typeof ReactOnchainVersioning.MAX_HISTORY>;
+  versionStrings: FixedArray<ByteString, typeof ReactOnchainVersioning.MAX_HISTORY>;
 
   // Total number of versions ever added
   @prop(true)
@@ -64,16 +64,19 @@ export class ReactOnchainVersioning extends SmartContract {
     owner: PubKey,
     originOutpoint: ByteString,
     appName: ByteString,
-    versionMap: HashedMap<ByteString, VersionData>
+    versionHistory: FixedArray<VersionData, typeof ReactOnchainVersioning.MAX_HISTORY>,
+    versionStrings: FixedArray<ByteString, typeof ReactOnchainVersioning.MAX_HISTORY>,
+    versionCount: bigint,
+    latestVersion: ByteString
   ) {
     super(...arguments);
     this.owner = owner;
     this.originOutpoint = originOutpoint;
     this.appName = appName;
-    this.versionMap = versionMap;
-    this.versionHistory = fill(toByteString(''), ReactOnchainVersioning.MAX_HISTORY);
-    this.versionCount = 0n;
-    this.latestVersion = toByteString('');
+    this.versionHistory = versionHistory;
+    this.versionStrings = versionStrings;
+    this.versionCount = versionCount;
+    this.latestVersion = latestVersion;
   }
 
   /**
@@ -99,8 +102,14 @@ export class ReactOnchainVersioning extends SmartContract {
     // Outpoint cannot be empty
     assert(outpoint != toByteString(''), 'Outpoint cannot be empty');
 
-    // Version cannot already exist (prevent duplicate versions)
-    assert(!this.versionMap.has(version), 'Version already exists');
+    // Check for duplicate versions by iterating versionStrings
+    let isDuplicate = false;
+    for (let i = 0; i < ReactOnchainVersioning.MAX_HISTORY; i++) {
+      if (this.versionStrings[i] == version) {
+        isDuplicate = true;
+      }
+    }
+    assert(!isDuplicate, 'Version already exists');
 
     // Create version data
     const versionData: VersionData = {
@@ -109,69 +118,24 @@ export class ReactOnchainVersioning extends SmartContract {
       timestamp: this.ctx.locktime, // Use locktime as timestamp
     };
 
-    // Add to version map
-    this.versionMap.set(version, versionData);
-
     // Update latest version
     this.latestVersion = version;
 
-    // Add to history (shift array right, insert at index 0)
-    // Iterate through all positions and shift
+    // Add to history arrays (shift right, insert at index 0)
     for (let i = 0; i < ReactOnchainVersioning.MAX_HISTORY; i++) {
       if (i < ReactOnchainVersioning.MAX_HISTORY - 1) {
         // Shift from end to beginning
         this.versionHistory[ReactOnchainVersioning.MAX_HISTORY - 1 - i] =
           this.versionHistory[ReactOnchainVersioning.MAX_HISTORY - 2 - i];
+        this.versionStrings[ReactOnchainVersioning.MAX_HISTORY - 1 - i] =
+          this.versionStrings[ReactOnchainVersioning.MAX_HISTORY - 2 - i];
       }
     }
-    this.versionHistory[0] = version;
+    this.versionHistory[0] = versionData;
+    this.versionStrings[0] = version;
 
     // Increment version count
     this.versionCount++;
-
-    // Ensure contract state is properly propagated
-    const amount: bigint = this.ctx.utxo.value;
-    const outputs: ByteString = this.buildStateOutput(amount) + this.buildChangeOutput();
-    assert(this.ctx.hashOutputs == hash256(outputs), 'hashOutputs mismatch');
-  }
-
-  /**
-   * Verify a version exists in the history
-   * Used for on-chain verification with expected data
-   */
-  @method()
-  public verifyVersionExists(version: ByteString, expectedData: VersionData) {
-    assert(this.versionMap.has(version), 'Version does not exist');
-    assert(this.versionMap.canGet(version, expectedData), 'Version data mismatch');
-
-    // Ensure state is maintained
-    const amount: bigint = this.ctx.utxo.value;
-    const outputs: ByteString = this.buildStateOutput(amount) + this.buildChangeOutput();
-    assert(this.ctx.hashOutputs == hash256(outputs), 'hashOutputs mismatch');
-  }
-
-  /**
-   * Update the origin outpoint (one-time only, if currently "pending")
-   * @param ownerSig - Signature from the contract owner
-   * @param newOrigin - The actual origin outpoint after inscription
-   */
-  @method()
-  public updateOrigin(ownerSig: Sig, newOrigin: ByteString) {
-    // Verify owner signature
-    assert(this.checkSig(ownerSig, this.owner), 'Invalid owner signature');
-
-    // Can only update if current origin is "pending"
-    assert(
-      this.originOutpoint == toByteString('pending', true),
-      'Origin already set, cannot update'
-    );
-
-    // New origin cannot be empty or "pending"
-    assert(newOrigin != toByteString(''), 'New origin cannot be empty');
-    assert(newOrigin != toByteString('pending', true), 'New origin cannot be pending');
-
-    // Update origin
-    this.originOutpoint = newOrigin;
 
     // Ensure contract state is properly propagated
     const amount: bigint = this.ctx.utxo.value;

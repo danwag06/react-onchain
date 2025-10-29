@@ -97,6 +97,8 @@ export interface DeploymentResult {
   versioningContract?: string;
   /** Version deployed (if versioning enabled) */
   version?: string;
+  /** Version description/changelog (if versioning enabled) */
+  versionDescription?: string;
 }
 
 /**
@@ -116,6 +118,22 @@ export interface DeploymentManifest {
   version?: string;
   /** Version description/changelog (if versioning enabled) */
   versionDescription?: string;
+}
+
+/**
+ * Enhanced manifest with full deployment history
+ */
+export interface DeploymentManifestHistory {
+  /** Manifest schema version for future compatibility */
+  manifestVersion: string;
+  /** Optional project name/identifier */
+  projectName?: string;
+  /** Shared versioning contract outpoint (if versioning enabled) */
+  versioningContract?: string;
+  /** Total number of deployments */
+  totalDeployments: number;
+  /** Array of all deployments (chronological order) */
+  deployments: DeploymentManifest[];
 }
 
 /**

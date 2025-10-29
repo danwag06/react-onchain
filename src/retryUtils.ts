@@ -93,15 +93,26 @@ export function isUtxoNotFoundError(error: any): boolean {
  * Determine if an error should trigger a retry
  */
 export function shouldRetryError(error: any, attempt: number): boolean {
+  const errorMsg = error instanceof Error ? error.message : String(error);
+  const lowerMsg = errorMsg.toLowerCase();
+
+  // NEVER retry double-spend or already spent errors
+  if (
+    lowerMsg.includes('already spent') ||
+    lowerMsg.includes('double spend') ||
+    lowerMsg.includes('txn-mempool-conflict') ||
+    lowerMsg.includes('missing inputs') ||
+    lowerMsg.includes('bad-txns-inputs-spent')
+  ) {
+    return false;
+  }
+
   // Always retry UTXO not found errors
   if (isUtxoNotFoundError(error)) {
     return true;
   }
 
   // Retry network-related errors
-  const errorMsg = error instanceof Error ? error.message : String(error);
-  const lowerMsg = errorMsg.toLowerCase();
-
   if (
     lowerMsg.includes('network') ||
     lowerMsg.includes('timeout') ||

@@ -40,7 +40,9 @@
     "dotenv": "^17.2.3",
     "js-1sat-ord": "^0.1.82",
     "ora": "^8.0.1",
-    "scrypt-ts": "^1.4.0"
+    "scrypt-ord": "^1.0.17",
+    "scrypt-ts": "^1.4.0",
+    "superagent": "^10.2.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

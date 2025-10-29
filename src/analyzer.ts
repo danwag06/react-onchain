@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
 import { join, extname, relative, dirname, resolve } from 'path';
 import type { FileReference, DependencyNode, CONTENT_TYPES } from './types.js';
 

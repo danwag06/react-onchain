@@ -1,15 +1,12 @@
 import { readFile } from 'fs/promises';
-import {
-  PrivateKey,
-  type Transaction,
-  type BroadcastResponse,
-  type BroadcastFailure,
-} from '@bsv/sdk';
-import { createOrdinals, fetchPayUtxos } from 'js-1sat-ord';
+import { PrivateKey } from '@bsv/sdk';
+import { createOrdinals } from 'js-1sat-ord';
 import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
 import { createHash } from 'crypto';
-import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
+import { retryWithBackoff, shouldRetryError, isUtxoNotFoundError } from './retryUtils.js';
+import { OrdiProvider } from './OrdiProvider.js';
+import { bsv, type UTXO } from 'scrypt-ts';
 
 /**
  * Generates a mock transaction ID for dry-run mode
@@ -20,48 +17,16 @@ function generateMockTxid(filePath: string): string {
 }
 
 /**
- * Custom broadcaster for 1Sat Ordinals API
- * Uses native fetch (Node 18+) to broadcast transactions
+ * Convert scrypt-ts UTXO format to js-1sat-ord Utxo format
+ * Note: js-1sat-ord expects base64 encoded scripts, scrypt-ts uses hex
  */
-async function broadcast1Sat(tx: Transaction): Promise<BroadcastResponse | BroadcastFailure> {
-  const url = 'https://ordinals.1sat.app/v5/tx';
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-      },
-      body: Buffer.from(tx.toBinary()),
-    });
-
-    const body = (await response.json()) as {
-      txid: string;
-      success: boolean;
-      error: string;
-      status: number;
-    };
-
-    if (response.status !== 200) {
-      return {
-        status: 'error',
-        code: response.status.toString(),
-        description: body.error || 'Unknown error',
-      } as BroadcastFailure;
-    }
-
-    return {
-      status: 'success',
-      txid: body.txid,
-      message: 'Transaction broadcast successfully',
-    } as BroadcastResponse;
-  } catch (error) {
-    return {
-      status: 'error',
-      code: '500',
-      description: error instanceof Error ? error.message : 'Network error',
-    } as BroadcastFailure;
-  }
+function convertToJsOrdUtxo(utxo: UTXO): Utxo {
+  return {
+    satoshis: utxo.satoshis,
+    txid: utxo.txId,
+    vout: utxo.outputIndex,
+    script: Buffer.from(utxo.script, 'hex').toString('base64'),
+  };
 }
 
 /**
@@ -73,6 +38,7 @@ export async function inscribeFile(
   contentType: string,
   destinationAddress: string,
   paymentKey: PrivateKey,
+  provider: OrdiProvider,
   content?: string,
   satsPerKb?: number,
   dryRun?: boolean,
@@ -115,75 +81,125 @@ export async function inscribeFile(
   // Convert content to base64
   const dataB64 = Buffer.from(fileContent).toString('base64');
 
-  // Wrap inscription and broadcast in retry logic
-  const { txid, tx, payChange } = await retryWithBackoff(
-    async () => {
-      // Get UTXOs for payment (refetch on each retry unless specific UTXO provided)
-      let utxos: Utxo[];
+  // Estimate required funding
+  // Rough estimate: inscription data + 500 bytes overhead (inputs, outputs, signatures)
+  const estimatedTxSize = fileSize + 500;
+  const feeRate = satsPerKb || 50;
+  const estimatedFee = Math.ceil((estimatedTxSize / 1000) * feeRate);
+  const requiredSats = estimatedFee + 1; // +1 for inscription output
 
-      if (paymentUtxo) {
-        // Use the provided UTXO (change from previous transaction)
-        console.log(
-          `   Using change UTXO: ${paymentUtxo.txid}:${paymentUtxo.vout} (${paymentUtxo.satoshis} sats)`
-        );
-        utxos = [paymentUtxo];
-      } else {
-        // Fetch UTXOs from the network (refetches on each retry)
-        const paymentAddress = paymentKey.toAddress().toString();
-        utxos = await fetchPayUtxos(paymentAddress);
+  // Fetch UTXOs and build transaction ONCE (outside retry loop)
+  let utxos: Utxo[];
+  const paymentAddressStr = paymentKey.toAddress().toString();
+  const paymentAddress = bsv.Address.fromString(paymentAddressStr);
 
-        if (!utxos || utxos.length === 0) {
-          throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
-        }
+  if (paymentUtxo) {
+    // Check if the change UTXO has enough funds
+    if (paymentUtxo.satoshis >= requiredSats) {
+      // Use the provided UTXO (change from previous transaction)
+      utxos = [paymentUtxo];
+    } else {
+      // Change UTXO is insufficient, fetch additional UTXOs
+      const providerUtxos = await provider.listUnspent(paymentAddress, {
+        unspentValue: 1, // 1 sat for inscription output
+        estimateSize: estimatedTxSize,
+        feePerKb: feeRate,
+        additional: 100, // Small buffer
+      });
 
-        console.log(`   Found ${utxos.length} UTXO(s) for ${originalPath}`);
-        utxos.forEach((u, i) => {
-          console.log(`     [${i}] ${u.txid}:${u.vout} (${u.satoshis} sats)`);
-        });
+      if (!providerUtxos || providerUtxos.length === 0) {
+        throw new Error(`No additional UTXOs found for payment address ${paymentAddress}`);
       }
 
-      // Create the inscription
-      const result = await createOrdinals({
-        utxos,
-        destinations: [
-          {
-            address: destinationAddress,
-            inscription: {
-              dataB64,
-              contentType,
-            },
-          },
-        ],
-        paymentPk: paymentKey,
-        satsPerKb,
-      });
+      // Convert scrypt-ts UTXOs to js-1sat-ord format
+      const freshUtxos = providerUtxos.map(convertToJsOrdUtxo);
 
-      // Log which UTXOs are being spent
-      console.log(`   Spending ${utxos.length} input(s):`);
-      utxos.forEach((u, i) => {
-        console.log(`     Input[${i}]: ${u.txid}:${u.vout} (${u.satoshis} sats)`);
-      });
+      // Combine change UTXO with fresh UTXOs
+      utxos = [paymentUtxo, ...freshUtxos];
+    }
+  } else {
+    // No change UTXO, fetch UTXOs from provider with funding requirements
+    const providerUtxos = await provider.listUnspent(paymentAddress, {
+      unspentValue: 1, // 1 sat for inscription output
+      estimateSize: estimatedTxSize,
+      feePerKb: feeRate,
+      additional: 100, // Small buffer
+    });
 
-      // Broadcast the transaction to 1Sat Ordinals API
-      console.log(`   Broadcasting transaction for ${originalPath}...`);
-      const broadcastResult = await broadcast1Sat(result.tx);
+    if (!providerUtxos || providerUtxos.length === 0) {
+      throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
+    }
 
-      if (broadcastResult.status !== 'success') {
-        const errorMsg = broadcastResult.description || 'Unknown error';
-        console.log(`   ❌ Broadcast failed: ${errorMsg}`);
+    // Convert scrypt-ts UTXOs to js-1sat-ord format
+    utxos = providerUtxos.map(convertToJsOrdUtxo);
+  }
+
+  // Build the inscription transaction ONCE
+  let result = await createOrdinals({
+    utxos,
+    destinations: [
+      {
+        address: destinationAddress,
+        inscription: {
+          dataB64,
+          contentType,
+        },
+      },
+    ],
+    paymentPk: paymentKey,
+    satsPerKb,
+  });
+
+  // Only retry the broadcast (transaction is already built)
+  const txid = await retryWithBackoff(
+    async () => {
+      // Broadcast the transaction via OrdiProvider
+      try {
+        const txid = await provider.sendRawTransaction(result.tx.toHex());
+        return txid;
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+
+        // If UTXO error and we're NOT using a provided paymentUtxo, try to rebuild transaction
+        if (
+          !paymentUtxo &&
+          isUtxoNotFoundError(error instanceof Error ? error : new Error(errorMsg))
+        ) {
+          // Refetch UTXOs with funding requirements
+          const providerUtxos = await provider.listUnspent(paymentAddress, {
+            unspentValue: 1,
+            estimateSize: estimatedTxSize,
+            feePerKb: feeRate,
+            additional: 100,
+          });
+
+          if (!providerUtxos || providerUtxos.length === 0) {
+            throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
+          }
+
+          // Convert and rebuild transaction with fresh UTXOs
+          utxos = providerUtxos.map(convertToJsOrdUtxo);
+
+          result = await createOrdinals({
+            utxos,
+            destinations: [
+              {
+                address: destinationAddress,
+                inscription: {
+                  dataB64,
+                  contentType,
+                },
+              },
+            ],
+            paymentPk: paymentKey,
+            satsPerKb,
+          });
+        }
 
         throw new Error(
           `Failed to broadcast inscription transaction for ${originalPath}: ${errorMsg}`
         );
       }
-
-      console.log(`   ✅ Broadcast successful: ${broadcastResult.txid}`);
-
-      return {
-        txid: broadcastResult.txid!,
-        tx: result.tx,
-        payChange: result.payChange,
-      };
     },
     {
       maxAttempts: 5,
@@ -192,6 +208,9 @@ export async function inscribeFile(
     },
     shouldRetryError
   );
+
+  const tx = result.tx;
+  const payChange = result.payChange;
 
   // Find the inscription output - it's the 1-sat output to the destination address
   let vout = 0;
@@ -233,6 +252,7 @@ export async function inscribeFiles(
   }>,
   destinationAddress: string,
   paymentKey: PrivateKey,
+  provider: OrdiProvider,
   satsPerKb?: number,
   onProgress?: (current: number, total: number, file: string) => void
 ): Promise<InscribedFile[]> {
@@ -252,6 +272,7 @@ export async function inscribeFiles(
       file.contentType,
       destinationAddress,
       paymentKey,
+      provider,
       file.content,
       satsPerKb,
       false, // not dry-run
