@@ -93,7 +93,7 @@ npx react-onchain deploy \
 The CLI will output the entry point URL:
 
 ```
-https://ordfs.network/<txid>_<vout>
+https://ordfs.network/content/<txid>_<vout>
 ```
 
 After your first deployment, a `.env` file is automatically created with your configuration. This means subsequent deployments only need the version information:
@@ -191,7 +191,7 @@ TOTAL                                   162.13 KB      4 files
 ──────────────────────────────────────────────────────────────────────
 
 ✨ Deployment complete!
-Entry point: https://ordfs.network/abc123def456_0
+Entry point: https://ordfs.network/content/abc123def456_0
 
 Manifest saved to: deployment-manifest.json
 Configuration saved to: .env
@@ -313,13 +313,13 @@ A JSON manifest is generated after deployment:
 ```json
 {
   "timestamp": "2025-10-27T02:00:00.000Z",
-  "entryPoint": "https://ordfs.network/abc123_0",
+  "entryPoint": "/content/abc123_0",
   "files": [
     {
       "originalPath": "index.html",
       "txid": "abc123...",
       "vout": 0,
-      "url": "https://ordfs.network/abc123_0",
+      "urlPath": "/content/abc123_0",
       "size": 2450
     }
   ],
@@ -436,13 +436,11 @@ react-onchain/
 │   ├── config.ts                         # Configuration management
 │   ├── inscriber.ts                      # Blockchain inscription handler
 │   ├── orchestrator.ts                   # Deployment orchestration
-│   ├── OrdiProvider.ts                   # Custom ordinals provider
 │   ├── rewriter.ts                       # Reference rewriting (HTML/CSS/JS)
 │   ├── retryUtils.ts                     # Retry logic with backoff
 │   ├── types.ts                          # TypeScript type definitions
 │   ├── versioningInscriptionHandler.ts   # Inscription-based versioning
 │   ├── versionRedirect.template.js       # Client-side version redirect script
-│   ├── serviceResolver.template.js       # Client-side service failover
 │   └── index.ts                          # Public API exports
 ├── tests/                                # Test suite
 ├── dist/                                 # Compiled JavaScript
