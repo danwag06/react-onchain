@@ -77,34 +77,47 @@
           return;
         }
       } else {
-        // STEP 2: No version param - check if latest is different from origin
-        console.log('[react-onchain] No version param - checking if latest differs from origin');
+        // STEP 2: No version param - check if latest is different from current
+        console.log('[react-onchain] No version param - checking if latest differs from current');
 
-        // Get the latest inscription from x-bsv-inscriptions header
-        // Format: "txid_vout,origin,<timestamp>; txid_vout,origin,<timestamp>; ..."
-        const inscriptionsHeader = response.headers.get('x-bsv-inscriptions');
-
-        if (inscriptionsHeader) {
-          // Parse the first inscription (latest)
-          const firstInscription = inscriptionsHeader.split(';')[0].trim();
-          const latestOutpoint = firstInscription.split(',')[0];
-
-          console.log('[react-onchain] Latest outpoint:', latestOutpoint);
-          console.log('[react-onchain] Origin outpoint:', VERSION_INSCRIPTION_ORIGIN);
-
-          // If latest is same as origin, no redirect needed
-          if (latestOutpoint === VERSION_INSCRIPTION_ORIGIN) {
-            console.log('[react-onchain] Already on latest version (same as origin)');
-            return;
+        // Parse all version entries from metadata
+        const versionEntries = [];
+        for (const key in metadata) {
+          if (key.startsWith('version.')) {
+            try {
+              const versionData = JSON.parse(metadata[key]);
+              versionEntries.push({
+                version: key.replace('version.', ''),
+                outpoint: versionData.outpoint,
+                timestamp: versionData.utcTimeStamp || 0,
+              });
+            } catch (error) {
+              console.warn('[react-onchain] Failed to parse version entry:', key, error);
+            }
           }
+        }
 
-          // Latest is different from origin - redirect to latest
-          targetOutpoint = latestOutpoint;
-          console.log('[react-onchain] Latest version differs from origin - will redirect');
-        } else {
-          console.log('[react-onchain] No inscriptions header found - staying on current page');
+        if (versionEntries.length === 0) {
+          console.log('[react-onchain] No versions found in metadata - staying on current page');
           return;
         }
+
+        // Find latest version by timestamp
+        versionEntries.sort((a, b) => b.timestamp - a.timestamp);
+        const latestVersion = versionEntries[0];
+
+        console.log('[react-onchain] Latest version:', latestVersion.version, 'at', latestVersion.outpoint);
+        console.log('[react-onchain] Current outpoint:', currentOutpoint);
+
+        // Check if we're already on the latest version
+        if (latestVersion.outpoint === currentOutpoint) {
+          console.log('[react-onchain] Already on latest version');
+          return;
+        }
+
+        // Redirect to latest version
+        targetOutpoint = latestVersion.outpoint;
+        console.log('[react-onchain] Will redirect to latest version');
       }
 
       // STEP 3: Perform redirect if needed
