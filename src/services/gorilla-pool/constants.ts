@@ -1,4 +1,4 @@
-export const GORILLA_POOL_INDEXER_URL = 'https://ordinals.gorillapool.io/api';
+export const GORILLA_POOL_INDEXER_URL = 'https://ordinals.1sat.app';
 export const GORILLA_POOL_CONTENT_URL = 'https://go-ordfs-server-production.up.railway.app';
 
 /**

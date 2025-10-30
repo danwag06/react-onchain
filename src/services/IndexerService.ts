@@ -5,16 +5,32 @@
  * Each implementation handles service-specific API endpoints, query parameters, and response formats.
  */
 
-import type { UTXO, TransactionResponse, UtxoQueryOptions } from 'scrypt-ts';
+import { Utxo } from 'js-1sat-ord';
+import { VersionMetadata } from '../versioningInscriptionHandler.js';
 
-// Re-export types for use by other modules
-export type { UTXO, TransactionResponse, UtxoQueryOptions };
+export type GorillaPoolUtxo = {
+  outpoint: string;
+  height: number;
+  idx: number;
+  satoshis: number;
+  script: string;
+  owners: string[];
+  data: Record<string, any>;
+  score: number;
+};
+
+export type UtxoQueryOptions = {
+  unspentValue: number;
+  estimateSize: number;
+  feePerKb: number;
+  additional: number;
+};
 
 /**
  * Browser-compatible indexer configuration
  *
- * This interface allows browser scripts to dynamically construct API calls
- * for different indexer services without needing the full TypeScript class.
+ * Provides basic indexer information for use in browser contexts.
+ * The browser typically uses the content URL to fetch inscriptions directly.
  */
 export interface BrowserIndexerConfig {
   /** Display name of the indexer service */
@@ -25,21 +41,6 @@ export interface BrowserIndexerConfig {
 
   /** Content delivery URL (where inscribed files are served from) */
   contentUrl: string;
-
-  /** Endpoint URL constructors */
-  endpoints: {
-    /** Construct URL to fetch latest inscription by origin */
-    fetchLatestByOrigin: (origin: string) => string;
-
-    /** Construct URL to fetch transaction by txid */
-    getTransaction: (txid: string) => string;
-  };
-
-  /**
-   * Optional response parser for fetchLatestByOrigin
-   * If not provided, browser will expect standard format: { txid, vout, script }
-   */
-  parseLatestByOrigin?: (data: any) => { txid: string; vout: number; script?: string };
 }
 
 /**
@@ -52,18 +53,24 @@ export interface BrowserIndexerConfig {
  */
 export abstract class IndexerService {
   protected baseUrl: string;
+  protected contentUrl: string;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, contentUrl: string) {
     this.baseUrl = baseUrl;
+    this.contentUrl = contentUrl;
   }
 
   /**
-   * Fetch the latest inscription in an origin chain
+   * Fetch the latest inscription in an origin chain using standard content delivery endpoint
+   * Uses /content/<origin>?seq=-1 pattern which works across all ordinals service providers
    *
    * @param origin - The origin outpoint (txid_vout)
-   * @returns The latest UTXO in the chain, or null if not found/spent
+   * @returns The latest version metadata, or null if not found/spent
    */
-  abstract fetchLatestByOrigin(origin: string): Promise<UTXO | null>;
+  abstract fetchLatestVersionMetadata(
+    origin: string,
+    includeUtxo: boolean
+  ): Promise<{ metadata: VersionMetadata; utxo: Utxo | null }>;
 
   /**
    * Broadcast a raw transaction to the network
@@ -85,7 +92,7 @@ export abstract class IndexerService {
     address: string,
     options?: UtxoQueryOptions,
     type?: 'pay' | 'ordinal'
-  ): Promise<UTXO[]>;
+  ): Promise<Utxo[]>;
 
   /**
    * Get the base URL for this indexer service

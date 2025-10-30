@@ -6,4 +6,3 @@
 
 export { IndexerService, type BrowserIndexerConfig } from './IndexerService.js';
 export { GorillaPoolIndexer } from './gorilla-pool/indexer.js';
-export { GorillaPoolBrowserConfig } from './gorilla-pool/browserConfig.js';

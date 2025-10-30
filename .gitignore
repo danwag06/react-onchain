@@ -10,3 +10,5 @@ test-app/
 # Environment variables (may contain sensitive keys)
 .env*
 !.env.example
+
+blah-app/

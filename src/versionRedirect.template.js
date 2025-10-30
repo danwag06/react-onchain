@@ -4,41 +4,28 @@
  * Automatically injected by react-onchain into deployed applications.
  * Handles version resolution by querying inscription metadata.
  *
- * Placeholders (replaced during injection):
- * - VERSION_INSCRIPTION_ORIGIN_PLACEHOLDER: The origin outpoint of the versioning inscription
- * - ORDINALS_CONTENT_URL_PLACEHOLDER: The base service URL (e.g., https://ordfs.network)
+ * Values replaced during injection:
+ * - VERSION_INSCRIPTION_ORIGIN: The origin outpoint of the versioning inscription
  */
 (function () {
-  const VERSION_INSCRIPTION_ORIGIN = 'VERSION_INSCRIPTION_ORIGIN_PLACEHOLDER';
-  const ORDINALS_CONTENT_URL = 'ORDINALS_CONTENT_URL_PLACEHOLDER';
-
-  // Only run if we have a versioning inscription (check if placeholder was replaced)
-  if (!VERSION_INSCRIPTION_ORIGIN || VERSION_INSCRIPTION_ORIGIN.indexOf('PLACEHOLDER') >= 0) {
-    return; // No versioning inscription configured (likely first deployment)
-  }
+  const VERSION_INSCRIPTION_ORIGIN = '__VERSION_INSCRIPTION_ORIGIN__';
 
   const params = new URLSearchParams(window.location.search);
   const requestedVersion = params.get('version');
 
-  // No version requested, use current page
-  if (!requestedVersion) {
-    return;
-  }
-
   /**
-   * Fetch version metadata from the latest inscription
-   * Returns parsed metadata object with version:outpoint mappings
+   * Main redirect logic
+   * 1. If ?version param exists, redirect to that specific version
+   * 2. If no ?version param, check if latest is different from origin and redirect if needed
    */
-  async function getVersionMetadata() {
+  async function redirectToVersion() {
     try {
-      // Fetch the latest inscription in the origin chain using seq=-1
-      const url = `${ORDINALS_CONTENT_URL}/content/${VERSION_INSCRIPTION_ORIGIN}?seq=-1&map=true`;
+      // Use relative path for querying latest inscription
+      const url = `/content/${VERSION_INSCRIPTION_ORIGIN}?seq=-1&map=true`;
+      console.log('[react-onchain] Fetching latest version metadata from:', url);
 
-      console.log('[react-onchain] Fetching version metadata from:', url);
-
-      const response = await fetch(url, {
-        method: 'HEAD', // Only need headers, not content
-      });
+      //TODO: use method head to get the headers only and fix other places that call this endpoint
+      const response = await fetch(url);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -55,53 +42,16 @@
       const metadata = JSON.parse(mapHeader);
       console.log('[react-onchain] Version metadata loaded:', metadata);
 
-      return metadata;
-    } catch (error) {
-      console.error('[react-onchain] Failed to fetch version metadata:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Get the preferred content service from localStorage
-   */
-  function getPreferredContentService() {
-    try {
-      const stored = localStorage.getItem('react-onchain-preferred-service');
-      if (stored) {
-        const data = JSON.parse(stored);
-        return data.service;
-      }
-    } catch (e) {
-      // Ignore errors
-    }
-    return ORDINALS_CONTENT_URL; // Default to injected URL
-  }
-
-  /**
-   * Main redirect logic
-   */
-  async function redirectToVersion() {
-    try {
-      console.log('[react-onchain] Resolving version:', requestedVersion);
+      // Get current outpoint from URL
+      const currentPath = window.location.pathname;
+      const currentOutpoint = currentPath.split('/').pop();
+      console.log('[react-onchain] Current outpoint:', currentOutpoint);
 
       let targetOutpoint = null;
 
-      if (requestedVersion === 'latest') {
-        // For latest version, ordfs.network handles this natively with seq=-1
-        // We can redirect to the origin with seq=-1
-        targetOutpoint = `${VERSION_INSCRIPTION_ORIGIN}?seq=-1`;
-        console.log('[react-onchain] Redirecting to latest version');
-      } else {
-        // For specific versions, query the metadata
-        console.log('[react-onchain] Fetching metadata for version:', requestedVersion);
-
-        const metadata = await getVersionMetadata();
-
-        if (!metadata) {
-          console.error('[react-onchain] Failed to load metadata, staying on current page');
-          return;
-        }
+      // STEP 1: Check if specific version requested
+      if (requestedVersion) {
+        console.log('[react-onchain] Resolving requested version:', requestedVersion);
 
         // Look up version in metadata (format: version.X.X.X)
         const versionKey = `version.${requestedVersion}`;
@@ -126,28 +76,47 @@
           console.error('[react-onchain] Failed to parse version metadata:', error);
           return;
         }
+      } else {
+        // STEP 2: No version param - check if latest is different from origin
+        console.log('[react-onchain] No version param - checking if latest differs from origin');
+
+        // Get the latest inscription from x-bsv-inscriptions header
+        // Format: "txid_vout,origin,<timestamp>; txid_vout,origin,<timestamp>; ..."
+        const inscriptionsHeader = response.headers.get('x-bsv-inscriptions');
+
+        if (inscriptionsHeader) {
+          // Parse the first inscription (latest)
+          const firstInscription = inscriptionsHeader.split(';')[0].trim();
+          const latestOutpoint = firstInscription.split(',')[0];
+
+          console.log('[react-onchain] Latest outpoint:', latestOutpoint);
+          console.log('[react-onchain] Origin outpoint:', VERSION_INSCRIPTION_ORIGIN);
+
+          // If latest is same as origin, no redirect needed
+          if (latestOutpoint === VERSION_INSCRIPTION_ORIGIN) {
+            console.log('[react-onchain] Already on latest version (same as origin)');
+            return;
+          }
+
+          // Latest is different from origin - redirect to latest
+          targetOutpoint = latestOutpoint;
+          console.log('[react-onchain] Latest version differs from origin - will redirect');
+        } else {
+          console.log('[react-onchain] No inscriptions header found - staying on current page');
+          return;
+        }
       }
 
-      // Get current outpoint from URL
-      const currentPath = window.location.pathname;
-      const currentOutpoint = currentPath.split('/').pop();
-
-      // Check if we're already on the target version
-      if (targetOutpoint && targetOutpoint !== currentOutpoint && !targetOutpoint.includes(currentOutpoint)) {
+      // STEP 3: Perform redirect if needed
+      if (targetOutpoint && targetOutpoint !== currentOutpoint) {
         console.log('[react-onchain] Redirecting to:', targetOutpoint);
 
-        // Use the preferred content service (or fall back to injected URL)
-        const contentService = getPreferredContentService();
-
-        // Build redirect URL
-        // If targetOutpoint already has query params (like ?seq=-1), preserve them
-        const newUrl = targetOutpoint.includes('?')
-          ? `${contentService}/content/${targetOutpoint}${window.location.hash}`
-          : `${contentService}/content/${targetOutpoint}${window.location.hash}`;
+        // Build redirect URL (use relative path for portability)
+        const newUrl = `/content/${targetOutpoint}${window.location.hash}`;
 
         window.location.href = newUrl;
       } else {
-        console.log('[react-onchain] Already on the requested version');
+        console.log('[react-onchain] Already on the target version');
       }
     } catch (error) {
       console.error('[react-onchain] Version redirect failed:', error);

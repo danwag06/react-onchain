@@ -6,10 +6,19 @@
  */
 
 import type { PrivateKey } from '@bsv/sdk';
-import { createOrdinals, sendOrdinals } from 'js-1sat-ord';
+import { createOrdinals, sendOrdinals, Utxo } from 'js-1sat-ord';
 import { createIndexer } from './config.js';
 import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
-import { GORILLA_POOL_CONTENT_URL } from './services/gorilla-pool/constants.js';
+import { IndexerService, GorillaPoolUtxo } from './services/IndexerService.js';
+
+let _indexer: IndexerService | null = null;
+
+function getIndexer(): IndexerService {
+  if (!_indexer) {
+    _indexer = createIndexer();
+  }
+  return _indexer;
+}
 
 export const VERSIONING_ENABLED = true;
 
@@ -21,41 +30,70 @@ export interface VersioningInscriptionInfo {
 }
 
 /**
+ * Structure of individual version entry (before stringification)
+ */
+export interface VersionEntry {
+  outpoint: string;
+  description: string;
+  utcTimeStamp: number;
+}
+
+/**
  * Version metadata structure in inscription
+ * Version keys must be prefixed with "version." and values are stringified VersionEntry objects
+ * Use createVersionEntry() helper to ensure type safety when adding version entries
  */
 export interface VersionMetadata {
   app: string;
   type: string;
-  [key: string]: string | number; // Dynamic version keys: version -> outpoint, version_description -> string
+  [key: string]: string; // Allows js-1sat-ord compatibility and dynamic indexing
 }
 
 /**
- * Deploy a new versioning inscription (first deployment only)
+ * Helper to create a version entry (provides type safety)
+ */
+export function createVersionEntry(
+  outpoint: string,
+  description: string,
+  utcTimeStamp: number = Date.now()
+): string {
+  const entry: VersionEntry = {
+    outpoint,
+    description,
+    utcTimeStamp,
+  };
+  return JSON.stringify(entry);
+}
+
+/**
+ * Helper to parse a version entry (provides type safety)
+ */
+export function parseVersionEntry(json: string): VersionEntry {
+  return JSON.parse(json) as VersionEntry;
+}
+
+/**
+ * Deploy an empty versioning inscription (becomes the origin)
+ * This is deployed BEFORE the HTML so the origin can be injected into the redirect script
+ * Metadata is added later by spending this inscription with updateVersioningInscription
  *
  * @param paymentKey - Private key for paying transaction fees
- * @param originOutpoint - The outpoint of the initial app deployment (entry point)
  * @param appName - Name of the application
- * @param initialVersion - Initial version to set (e.g., "1.0.0")
- * @param initialDescription - Description for initial version
  * @param destinationAddress - Address to receive the inscription
  * @param satsPerKb - Fee rate in satoshis per KB
  * @returns Inscription outpoint (txid_vout)
  */
 export async function deployVersioningInscription(
   paymentKey: PrivateKey,
-  originOutpoint: string,
   appName: string,
-  initialVersion: string,
-  initialDescription: string,
   destinationAddress: string,
   satsPerKb?: number
 ): Promise<string> {
   try {
-    // Wrap deployment in retry logic
     const result = await retryWithBackoff(
       async () => {
         // Create indexer for fetching UTXOs
-        const indexer = createIndexer();
+        const indexer = getIndexer();
 
         // Get payment address from key
         const paymentAddress = paymentKey.toAddress().toString();
@@ -78,42 +116,21 @@ export async function deployVersioningInscription(
             `No spendable UTXOs found for payment address: ${paymentAddress}. Fund this address first.`
           );
         }
-
-        // Convert UTXOs to js-1sat-ord format
-        const formattedUtxos = paymentUtxos.map((utxo) => ({
-          txid: utxo.txId,
-          vout: utxo.outputIndex,
-          satoshis: utxo.satoshis,
-          script: Buffer.from(utxo.script, 'hex').toString('base64'),
-        }));
-
-        // Prepare inscription metadata
+        // Prepare empty metadata (just app identifier)
         const metadata: VersionMetadata = {
           app: 'react-onchain',
           type: 'version',
-          [`version.${initialVersion}`]: JSON.stringify({
-            outpoint: originOutpoint,
-            description: initialDescription,
-            utcTimeStamp: Date.now(),
-          }),
         };
 
-        // Minimal content for versioning inscription (metadata is stored in x-map header)
-        const versionManifestContent = JSON.stringify({
-          type: 'react-onchain-version-manifest',
-          app: appName,
-        });
-        const dataB64 = Buffer.from(versionManifestContent).toString('base64');
-
-        // Create inscription transaction
+        // Create the inscription transaction with empty content
         const ordResult = await createOrdinals({
-          utxos: formattedUtxos,
+          utxos: paymentUtxos,
           destinations: [
             {
               address: destinationAddress,
               inscription: {
-                dataB64,
-                contentType: 'application/json',
+                dataB64: Buffer.from(appName).toString('base64'), // Empty data
+                contentType: 'text/plain',
               },
             },
           ],
@@ -123,10 +140,10 @@ export async function deployVersioningInscription(
           satsPerKb: satsPerKb ?? 1,
         });
 
-        // Broadcast transaction
+        // Broadcast the transaction
         const txid = await indexer.broadcastTransaction(ordResult.tx.toHex());
 
-        // Return inscription outpoint (always vout 0 for first output)
+        // Return the inscription outpoint (txid_vout)
         return `${txid}_0`;
       },
       {
@@ -174,14 +191,17 @@ export async function updateVersioningInscription(
     const result = await retryWithBackoff(
       async () => {
         // Create indexer
-        const indexer = createIndexer();
+        const indexer = getIndexer();
 
         // Fetch latest inscription in origin chain
-        const latestInscription = await indexer.fetchLatestByOrigin(versionInscriptionOrigin);
+        const { utxo: latestVersionUtxo } = await indexer.fetchLatestVersionMetadata(
+          versionInscriptionOrigin,
+          true
+        );
 
-        if (!latestInscription) {
+        if (!latestVersionUtxo) {
           throw new Error(
-            `Could not find versioning inscription at origin: ${versionInscriptionOrigin}`
+            `Could not find versioning inscription utxo at origin: ${versionInscriptionOrigin}`
           );
         }
 
@@ -208,36 +228,20 @@ export async function updateVersioningInscription(
           );
         }
 
-        // Convert payment UTXOs to js-1sat-ord format
-        const formattedUtxos = paymentUtxos.map((utxo) => ({
-          txid: utxo.txId,
-          vout: utxo.outputIndex,
-          satoshis: utxo.satoshis,
-          script: Buffer.from(utxo.script, 'hex').toString('base64'),
-        }));
-
         // Prepare new metadata (protocol will merge with existing)
         const metadata: VersionMetadata = {
           app: 'react-onchain',
           type: 'version',
-          [`version.${version}`]: JSON.stringify({
-            outpoint: versionOutpoint,
-            description: description,
-            utcTimeStamp: Date.now(),
-          }),
+          [`version.${version}`]: createVersionEntry(versionOutpoint, description),
         };
 
-        // Create transaction spending the previous inscription
-        const ordResult = await sendOrdinals({
-          // Spend the latest inscription in the origin chain
+        const ordData = {
           ordinals: [
             {
-              txid: latestInscription.txId,
-              vout: latestInscription.outputIndex,
-              satoshis: 1,
-              script: latestInscription.script
-                ? Buffer.from(latestInscription.script, 'hex').toString('base64')
-                : '',
+              txid: latestVersionUtxo.txid || '',
+              vout: latestVersionUtxo.vout || 0,
+              satoshis: latestVersionUtxo.satoshis || 1,
+              script: latestVersionUtxo.script || '',
             },
           ],
           destinations: [
@@ -248,15 +252,18 @@ export async function updateVersioningInscription(
           metaData: metadata,
           paymentPk: paymentKey,
           ordPk: ordPk,
-          paymentUtxos: formattedUtxos,
+          paymentUtxos,
           changeAddress: paymentAddress,
           satsPerKb: satsPerKb ?? 1,
-        });
+        };
+
+        // Create transaction spending the previous inscription
+        const ordResult = await sendOrdinals(ordData);
 
         // Broadcast transaction
         const txid = await indexer.broadcastTransaction(ordResult.tx.toHex());
 
-        // Return new inscription outpoint
+        // Return new inscription outpoint (txid_vout)
         return `${txid}_0`;
       },
       {
@@ -277,62 +284,26 @@ export async function updateVersioningInscription(
 }
 
 /**
- * Get version metadata from the latest inscription in the origin chain
- *
- * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
- * @returns Parsed metadata object with version:outpoint mappings
- */
-export async function getVersionMetadata(
-  versionInscriptionOrigin: string,
-  contentUrl?: string
-): Promise<VersionMetadata> {
-  try {
-    // Fetch metadata from content service using seq=-1 for latest
-    const serviceUrl = contentUrl || GORILLA_POOL_CONTENT_URL;
-    const url = `${serviceUrl}/content/${versionInscriptionOrigin}?seq=-1&map=true`;
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch metadata: HTTP ${response.status}`);
-    }
-
-    // Read x-map header
-    const mapHeader = response.headers.get('x-map');
-
-    if (!mapHeader) {
-      throw new Error('No version metadata found in inscription');
-    }
-
-    // Parse JSON metadata
-    const metadata = JSON.parse(mapHeader) as VersionMetadata;
-
-    return metadata;
-  } catch (error) {
-    console.error('Failed to get version metadata:', error);
-    throw new Error(
-      `Getting version metadata failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
-/**
  * Check if a version already exists in the inscription metadata
  * Throws an error if the version exists to prevent wasted inscription costs
  *
  * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
  * @param version - Version string to check
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
  * @throws Error if version already exists
  */
 export async function checkVersionExists(
   versionInscriptionOrigin: string,
-  version: string,
-  contentUrl?: string
+  version: string
 ): Promise<void> {
   try {
-    const metadata = await getVersionMetadata(versionInscriptionOrigin, contentUrl);
+    const indexer = getIndexer();
+    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+
+    if (!metadata) {
+      throw new Error(
+        `Could not find versioning inscription at origin: ${versionInscriptionOrigin}`
+      );
+    }
 
     // Check if version key exists in metadata (format: version.X.X.X)
     const versionKey = `version.${version}`;
@@ -370,20 +341,23 @@ export async function checkVersionExists(
  *
  * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
  * @param version - Version string to query
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
  * @returns Version details including outpoint and description
  */
 export async function getVersionDetails(
   versionInscriptionOrigin: string,
-  version: string,
-  contentUrl?: string
+  version: string
 ): Promise<{
   version: string;
   outpoint: string;
   description: string;
 } | null> {
   try {
-    const metadata = await getVersionMetadata(versionInscriptionOrigin, contentUrl);
+    const indexer = getIndexer();
+    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+
+    if (!metadata) {
+      return null;
+    }
 
     // Get version metadata (format: version.X.X.X)
     const versionKey = `version.${version}`;
@@ -393,19 +367,13 @@ export async function getVersionDetails(
       return null;
     }
 
-    // Parse the nested JSON
-    const versionMetadata = JSON.parse(versionData);
-    const outpoint = versionMetadata.outpoint;
-    const description = versionMetadata.description || '';
-
-    if (!outpoint || typeof outpoint !== 'string') {
-      return null;
-    }
+    // Parse the stringified version entry
+    const versionEntry = parseVersionEntry(versionData);
 
     return {
       version,
-      outpoint,
-      description: typeof description === 'string' ? description : '',
+      outpoint: versionEntry.outpoint,
+      description: versionEntry.description,
     };
   } catch (error) {
     console.error('Failed to get version details:', error);
@@ -419,15 +387,18 @@ export async function getVersionDetails(
  * Get inscription information
  *
  * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
  * @returns Inscription information including metadata
  */
 export async function getInscriptionInfo(
-  versionInscriptionOrigin: string,
-  contentUrl?: string
+  versionInscriptionOrigin: string
 ): Promise<VersioningInscriptionInfo> {
   try {
-    const metadata = await getVersionMetadata(versionInscriptionOrigin, contentUrl);
+    const indexer = getIndexer();
+    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+
+    if (!metadata) {
+      throw new Error(`No metadata found for versioning inscription: ${versionInscriptionOrigin}`);
+    }
 
     return {
       outpoint: versionInscriptionOrigin,
@@ -444,74 +415,24 @@ export async function getInscriptionInfo(
 }
 
 /**
- * Get version history from inscription metadata
- *
- * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
- * @returns Array of version data sorted by timestamp (newest first)
- */
-export async function getVersionHistory(
-  versionInscriptionOrigin: string,
-  contentUrl?: string
-): Promise<Array<{ version: string; description: string; outpoint: string }>> {
-  try {
-    const metadata = await getVersionMetadata(versionInscriptionOrigin, contentUrl);
-
-    // Extract version entries (keys without _description suffix)
-    const versionEntries: Array<{ version: string; description: string; outpoint: string }> = [];
-
-    for (const key of Object.keys(metadata)) {
-      // Skip system fields and description keys
-      if (!key.startsWith('version')) {
-        continue;
-      }
-
-      const version = key.replace('version.', '');
-      const versionMetadata = JSON.parse(metadata[key] as string);
-      const outpoint = versionMetadata.outpoint;
-      const description = versionMetadata.description;
-
-      // Only add if outpoint is a string (skip if it's a number)
-      if (typeof outpoint === 'string') {
-        versionEntries.push({
-          version,
-          outpoint,
-          description: typeof description === 'string' ? description : '',
-        });
-      }
-    }
-
-    // Sort by version string (simple lexicographic sort)
-    // For more advanced sorting, could use semver library
-    versionEntries.sort((a, b) => b.version.localeCompare(a.version));
-
-    return versionEntries;
-  } catch (error) {
-    console.error('Failed to get version history:', error);
-    throw new Error(
-      `Getting version history failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
-
-/**
  * Get both inscription info and version history with a single metadata fetch
  * This is more efficient than calling getInscriptionInfo and getVersionHistory separately
  *
  * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
- * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
  * @returns Object containing both inscription info and version history
  */
-export async function getVersionInfoAndHistory(
-  versionInscriptionOrigin: string,
-  contentUrl?: string
-): Promise<{
+export async function getVersionInfoAndHistory(versionInscriptionOrigin: string): Promise<{
   info: VersioningInscriptionInfo;
   history: Array<{ version: string; description: string; outpoint: string }>;
 }> {
   try {
     // Fetch metadata once
-    const metadata = await getVersionMetadata(versionInscriptionOrigin, contentUrl);
+    const indexer = getIndexer();
+    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+
+    if (!metadata) {
+      throw new Error(`No metadata found for versioning inscription: ${versionInscriptionOrigin}`);
+    }
 
     // Build inscription info
     const info: VersioningInscriptionInfo = {
@@ -525,22 +446,21 @@ export async function getVersionInfoAndHistory(
     const versionEntries: Array<{ version: string; description: string; outpoint: string }> = [];
 
     for (const key of Object.keys(metadata)) {
-      // Skip system fields and description keys
+      // Skip system fields
       if (!key.startsWith('version')) {
         continue;
       }
 
       const version = key.replace('version.', '');
-      const versionMetadata = JSON.parse(metadata[key] as string);
-      const outpoint = versionMetadata.outpoint;
-      const description = versionMetadata.description;
+      const versionData = metadata[key];
 
-      // Only add if outpoint is a string (skip if it's a number)
-      if (typeof outpoint === 'string') {
+      // Parse the stringified version entry
+      if (typeof versionData === 'string') {
+        const versionEntry = parseVersionEntry(versionData);
         versionEntries.push({
           version,
-          outpoint,
-          description: typeof description === 'string' ? description : '',
+          outpoint: versionEntry.outpoint,
+          description: versionEntry.description,
         });
       }
     }

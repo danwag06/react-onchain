@@ -198,13 +198,11 @@ export async function rewriteFile(
  *
  * @param htmlContent - Original HTML content
  * @param versionInscriptionOrigin - Origin outpoint of the versioning inscription
- * @param ordinalsContentUrl - Base URL for ordinals service (e.g., https://ordfs.network)
  * @returns Modified HTML with injected script
  */
 export async function injectVersionScript(
   htmlContent: string,
-  versionInscriptionOrigin: string,
-  ordinalsContentUrl: string
+  versionInscriptionOrigin: string
 ): Promise<string> {
   // Read the version redirect script template
   let scriptContent: string;
@@ -215,10 +213,8 @@ export async function injectVersionScript(
     return htmlContent;
   }
 
-  // Replace placeholders
-  scriptContent = scriptContent
-    .replace('VERSION_INSCRIPTION_ORIGIN_PLACEHOLDER', versionInscriptionOrigin)
-    .replace('ORDINALS_CONTENT_URL_PLACEHOLDER', ordinalsContentUrl);
+  // Replace placeholder
+  scriptContent = scriptContent.replace('__VERSION_INSCRIPTION_ORIGIN__', versionInscriptionOrigin);
 
   // Inject the script into the <head> section
   const headMatch = htmlContent.match(/<head[^>]*>/i);

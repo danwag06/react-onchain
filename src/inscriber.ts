@@ -5,7 +5,7 @@ import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
 import { createHash } from 'crypto';
 import { retryWithBackoff, shouldRetryError, isUtxoNotFoundError } from './retryUtils.js';
-import type { IndexerService, UTXO } from './services/IndexerService.js';
+import type { IndexerService } from './services/IndexerService.js';
 import { CONTENT_PATH } from './services/gorilla-pool/constants.js';
 
 /**
@@ -16,18 +16,18 @@ function generateMockTxid(filePath: string): string {
   return hash.substring(0, 64);
 }
 
-/**
- * Convert IndexerService UTXO format to js-1sat-ord Utxo format
- * Note: js-1sat-ord expects base64 encoded scripts, IndexerService uses hex
- */
-function convertToJsOrdUtxo(utxo: UTXO): Utxo {
-  return {
-    satoshis: utxo.satoshis,
-    txid: utxo.txId,
-    vout: utxo.outputIndex,
-    script: Buffer.from(utxo.script, 'hex').toString('base64'),
-  };
-}
+// /**
+//  * Convert IndexerService UTXO format to js-1sat-ord Utxo format
+//  * Note: js-1sat-ord expects base64 encoded scripts, IndexerService uses hex
+//  */
+// function convertToJsOrdUtxo(utxo: UTXO): Utxo {
+//   return {
+//     satoshis: utxo.satoshis,
+//     txid: utxo.txid,
+//     vout: utxo.vout,
+//     script: Buffer.from(utxo.script, 'hex').toString('base64'),
+//   };
+// }
 
 /**
  * Inscribes a single file on-chain (or simulates in dry-run mode)
@@ -97,7 +97,7 @@ export async function inscribeFile(
       // Use the provided UTXO (change from previous transaction)
       utxos = [paymentUtxo];
     } else {
-      // Change UTXO is insufficient, fetch additional UTXOs
+      // Change Utxos is insufficient, fetch additional Utxos
       const indexerUtxos = await indexer.listUnspent(paymentAddress, {
         unspentValue: 1, // 1 sat for inscription output
         estimateSize: estimatedTxSize,
@@ -109,11 +109,8 @@ export async function inscribeFile(
         throw new Error(`No additional UTXOs found for payment address ${paymentAddress}`);
       }
 
-      // Convert IndexerService UTXOs to js-1sat-ord format
-      const freshUtxos = indexerUtxos.map(convertToJsOrdUtxo);
-
       // Combine change UTXO with fresh UTXOs
-      utxos = [paymentUtxo, ...freshUtxos];
+      utxos = [paymentUtxo, ...indexerUtxos];
     }
   } else {
     // No change UTXO, fetch UTXOs from indexer with funding requirements
@@ -129,7 +126,7 @@ export async function inscribeFile(
     }
 
     // Convert IndexerService UTXOs to js-1sat-ord format
-    utxos = indexerUtxos.map(convertToJsOrdUtxo);
+    utxos = indexerUtxos;
   }
 
   // Build the inscription transaction ONCE
@@ -176,7 +173,7 @@ export async function inscribeFile(
           }
 
           // Convert and rebuild transaction with fresh UTXOs
-          utxos = indexerUtxos.map(convertToJsOrdUtxo);
+          utxos = indexerUtxos;
 
           result = await createOrdinals({
             utxos,

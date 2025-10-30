@@ -212,7 +212,8 @@ program
             }
           } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
             // Old format - single deployment
-            previousConfig.versioningContract = manifestData.versioningInscription || manifestData.versioningContract;
+            previousConfig.versioningContract =
+              manifestData.versioningInscription || manifestData.versioningContract;
             previousConfig.buildDir = manifestData.buildDir;
             previousConfig.destinationAddress = manifestData.destinationAddress;
           }
@@ -308,12 +309,12 @@ program
       );
       console.log(
         chalk.cyan('║') +
-          chalk.bold.white('             🚀 React OnChain Deployment              ').padEnd(67) +
+          chalk.bold.white('                  React OnChain Deployment                     ') +
           chalk.cyan('║')
       );
       console.log(
         chalk.cyan('║') +
-          chalk.gray('          Deploy your React app to the BSV blockchain        ').padEnd(67) +
+          chalk.gray('          Deploy your React app to the BSV blockchain          ') +
           chalk.cyan('║')
       );
       console.log(
@@ -347,7 +348,7 @@ program
           console.log(
             chalk.gray('  App name:        ') +
               chalk.green(options.appName) +
-              chalk.gray(' (new contract)')
+              chalk.gray(' (new versioning inscription)')
           );
         }
       }
@@ -418,18 +419,6 @@ program
           });
           spinner.start('');
         },
-        onVersioningContractStart: () => {
-          spinner.stop();
-          console.log(chalk.gray('─'.repeat(70)));
-          console.log();
-          spinner = ora({
-            text: chalk.magenta('Deploying versioning contract...'),
-            color: 'magenta',
-          }).start();
-        },
-        onVersioningContractComplete: () => {
-          spinner.succeed(chalk.green('Versioning contract deployed'));
-        },
         onDeploymentComplete: () => {
           spinner.stop();
           console.log(chalk.gray('─'.repeat(70)));
@@ -443,9 +432,7 @@ program
       );
       console.log(
         chalk.green('║') +
-          chalk.bold
-            .white('              ✨ Deployment Complete! ✨                  ')
-            .padEnd(67) +
+          chalk.bold.white('                     Deployment Complete!                      ') +
           chalk.green('║')
       );
       console.log(
@@ -461,14 +448,6 @@ program
 
       // Display file size summary
       displaySummary(result.inscriptions, result.totalSize);
-
-      // Entry point section
-      console.log(chalk.bold.white('🌐 Entry Point'));
-      console.log(chalk.gray('─'.repeat(70)));
-      const absoluteEntryPointUrl = result.ordinalContentUrl + result.entryPointUrl;
-      console.log(chalk.cyan.bold(`  ${absoluteEntryPointUrl}`));
-      console.log(chalk.gray('─'.repeat(70)));
-      console.log();
 
       // Stats section
       console.log(chalk.bold.white('📊 Deployment Stats'));
@@ -526,16 +505,20 @@ program
         console.log(chalk.bold.white('📋 Available Queries'));
         console.log(chalk.gray('─'.repeat(70)));
         console.log(
+          chalk.gray('Versioning Origin: ') + chalk.cyan(result.versioningContract || 'N/A')
+        );
+        console.log(chalk.gray('Current Version: ') + chalk.cyan(result.version || 'N/A'));
+        console.log(
           chalk.gray('  • Version history:   ') +
-            chalk.cyan(`npx react-onchain version:history ${result.versioningContract}`)
+            chalk.cyan(`npx react-onchain version:history <ORIGIN>`)
+        );
+        console.log(
+          chalk.gray('  • Version summary:   ') +
+            chalk.cyan(`npx react-onchain version:summary <ORIGIN>`)
         );
         console.log(
           chalk.gray('  • Version details:   ') +
-            chalk.cyan(`npx react-onchain version:info ${result.versioningContract} <VERSION>`)
-        );
-        console.log(
-          chalk.gray('  • Version summary:  ') +
-            chalk.cyan(`npx react-onchain version:summary ${result.versioningContract}`)
+            chalk.cyan(`npx react-onchain version:info <ORIGIN> <VERSION>`)
         );
         console.log(chalk.gray('─'.repeat(70)));
         console.log();
@@ -584,9 +567,7 @@ program
         );
         console.log(
           chalk.yellow('│') +
-            chalk.yellow
-              .bold('  This was a dry run. To deploy for real, remove --dry-run flag.  ')
-              .padEnd(68) +
+            chalk.yellow.bold(' This was a dry run. To deploy for real, remove --dry-run flag. ') +
             chalk.yellow('│')
         );
         console.log(
@@ -595,25 +576,25 @@ program
         console.log();
       } else {
         console.log(
-          chalk.green('╭─────────────────────────────────────────────────────────────────────╮')
+          chalk.green('╔═══════════════════════════════════════════════════════════════════╗')
         );
         console.log(
-          chalk.green('│') +
-            chalk.bold
-              .white('         🎉 Your app is now live on the blockchain! 🎉          ')
-              .padEnd(68) +
-            chalk.green('│')
-        );
-        console.log(chalk.green('│') + ''.padEnd(69) + chalk.green('│'));
-        console.log(
-          chalk.green('│') +
-            chalk
-              .gray('  ⏱️  Note: It may take ~10 minutes for full confirmation           ')
-              .padEnd(68) +
-            chalk.green('│')
+          chalk.green('║') +
+            chalk.bold.white('          Your app is now live on the blockchain!             ') +
+            chalk.green('║')
         );
         console.log(
-          chalk.green('╰─────────────────────────────────────────────────────────────────────╯')
+          chalk.green('║') +
+            '                                                                   ' +
+            chalk.green('║')
+        );
+        console.log(
+          chalk.green('║') +
+            chalk.gray('  Note: It may take ~10 minutes for full confirmation           ') +
+            chalk.green('║')
+        );
+        console.log(
+          chalk.green('╚═══════════════════════════════════════════════════════════════════╝')
         );
         console.log();
         console.log(
@@ -641,8 +622,7 @@ program
 
       const spinner = ora('Loading version history...').start();
 
-      const contentUrl = await loadContentUrl(options.manifest);
-      const { history, info } = await getVersionInfoAndHistory(inscriptionOrigin, contentUrl);
+      const { history, info } = await getVersionInfoAndHistory(inscriptionOrigin);
 
       spinner.succeed(chalk.green(`Found ${history.length} version(s)`));
 
@@ -687,7 +667,7 @@ program
       const spinner = ora(`Loading version ${version}...`).start();
 
       const contentUrl = await loadContentUrl(options.manifest);
-      const details = await getVersionDetails(inscriptionOrigin, version, contentUrl);
+      const details = await getVersionDetails(inscriptionOrigin, version);
 
       if (!details) {
         spinner.fail(chalk.red(`Version ${version} not found`));
@@ -723,8 +703,7 @@ program
 
       const spinner = ora('Loading inscription info...').start();
 
-      const contentUrl = await loadContentUrl(options.manifest);
-      const { info, history } = await getVersionInfoAndHistory(inscriptionOrigin, contentUrl);
+      const { info, history } = await getVersionInfoAndHistory(inscriptionOrigin);
 
       spinner.succeed(chalk.green('Inscription info loaded'));
 

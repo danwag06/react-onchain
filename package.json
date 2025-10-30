@@ -36,16 +36,16 @@
   "dependencies": {
     "@bsv/sdk": "^1.1.23",
     "@bsv/templates": "file:bsv-templates-1.1.0.tgz",
+    "axios": "^1.13.1",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "dotenv": "^17.2.3",
     "js-1sat-ord": "file:js-1sat-ord-0.1.83.tgz",
-    "ora": "^8.0.1",
-    "scrypt-ts": "^1.4.0",
-    "superagent": "^10.2.3"
+    "ora": "^8.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/superagent": "^8.1.9",
     "prettier": "^3.6.2",
     "typescript": "^5.7.0"
   }

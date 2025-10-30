@@ -1,7 +1,10 @@
 import dotenv from 'dotenv';
 import { GorillaPoolIndexer } from './services/gorilla-pool/indexer.js';
-import { GorillaPoolBrowserConfig } from './services/gorilla-pool/browserConfig.js';
 import type { IndexerService, BrowserIndexerConfig } from './services/IndexerService.js';
+import {
+  GORILLA_POOL_CONTENT_URL,
+  GORILLA_POOL_INDEXER_URL,
+} from './services/gorilla-pool/constants.js';
 
 // Load environment variables from .env file (if it exists)
 dotenv.config();
@@ -12,7 +15,11 @@ dotenv.config();
  * with a corresponding BrowserIndexerConfig export, then adding it here.
  */
 export const BROWSER_INDEXER_CONFIGS: ReadonlyArray<BrowserIndexerConfig> = [
-  GorillaPoolBrowserConfig,
+  {
+    name: 'GorillaPool',
+    baseUrl: GORILLA_POOL_INDEXER_URL,
+    contentUrl: GORILLA_POOL_CONTENT_URL,
+  },
   // Add more browser configs as new indexers are contributed
   // Example: WhatsOnChainBrowserConfig, BlockchairBrowserConfig, etc.
 ] as const;
@@ -23,10 +30,10 @@ export const BROWSER_INDEXER_CONFIGS: ReadonlyArray<BrowserIndexerConfig> = [
  */
 export const DEFAULT_CONFIG = {
   // Ordinals service configuration (from primary indexer)
-  ordinalContentUrl: BROWSER_INDEXER_CONFIGS[0].contentUrl,
-  ordinalIndexerUrl: BROWSER_INDEXER_CONFIGS[0].baseUrl,
+  ordinalContentUrl: GORILLA_POOL_CONTENT_URL,
+  ordinalIndexerUrl: GORILLA_POOL_INDEXER_URL,
 
-  // Transaction settings
+  // Transaction settings,
   satsPerKb: 1,
 
   // Build settings

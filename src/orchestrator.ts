@@ -26,8 +26,6 @@ export interface OrchestratorCallbacks {
   onInscriptionStart?: (file: string, current: number, total: number) => void;
   onInscriptionComplete?: (file: string, url: string) => void;
   onInscriptionSkipped?: (file: string, url: string) => void;
-  onVersioningContractStart?: () => void;
-  onVersioningContractComplete?: () => void;
   onDeploymentComplete?: (entryPointUrl: string) => void;
 }
 
@@ -134,7 +132,7 @@ export async function deployToChain(
   //   - Dry-run mode (don't hit the network)
   if (versioningContract && enableVersioning && version && !dryRun && VERSIONING_ENABLED) {
     try {
-      await checkVersionExists(versioningContract, version, primaryContentUrl);
+      await checkVersionExists(versioningContract, version);
     } catch (error) {
       // Version exists or other error - fail fast before inscribing anything
       throw new Error(
@@ -182,6 +180,53 @@ export async function deployToChain(
     }
   }
 
+  // Calculate total inscriptions for progress tracking
+  let totalInscriptions = order.length;
+  // Add empty versioning inscription for first deployment
+  if (enableVersioning && version && !versioningContract) {
+    totalInscriptions += 1;
+  }
+  // Add metadata update inscription if versioning enabled
+  if (enableVersioning && version) {
+    totalInscriptions += 1;
+  }
+
+  let currentInscriptionIndex = 0;
+
+  // Step 1.9: Deploy empty versioning inscription (FIRST DEPLOYMENT ONLY)
+  // This happens BEFORE HTML inscription so we can inject the origin into the redirect script
+  // The empty inscription becomes the origin, and we'll spend it after HTML deployment to add metadata
+  if (enableVersioning && version && !versioningContract && !dryRun && VERSIONING_ENABLED) {
+    currentInscriptionIndex++;
+    callbacks?.onInscriptionStart?.(
+      'versioning-origin',
+      currentInscriptionIndex,
+      totalInscriptions
+    );
+    try {
+      finalVersioningContract = await deployVersioningInscription(
+        paymentPk,
+        appName || 'ReactApp',
+        destinationAddress,
+        satsPerKb
+      );
+      callbacks?.onInscriptionComplete?.(
+        'versioning-origin',
+        `/content/${finalVersioningContract}`
+      );
+    } catch (error) {
+      console.warn(
+        '⚠️  Warning: Empty versioning inscription deployment failed. Continuing without versioning.'
+      );
+      console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
+      finalVersioningContract = undefined;
+    }
+  } else if (dryRun && enableVersioning && version && !versioningContract) {
+    // DRY RUN MODE - Create mock versioning inscription origin
+    const mockInscriptionTxid = 'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
+    finalVersioningContract = `${mockInscriptionTxid}_0`;
+  }
+
   // Step 2: Process files in topological order
   const inscriptions: InscribedFile[] = [];
   const urlMap = new Map<string, string>();
@@ -199,7 +244,8 @@ export async function deployToChain(
     const fileRef = node.file;
     const absolutePath = fileRef.absolutePath;
 
-    callbacks?.onInscriptionStart?.(filePath, i + 1, order.length);
+    currentInscriptionIndex++;
+    callbacks?.onInscriptionStart?.(filePath, currentInscriptionIndex, totalInscriptions);
 
     // Step 2.1: Check if we can reuse a previous inscription (cache hit)
     const previousInscription = previousInscriptions.get(filePath);
@@ -270,16 +316,12 @@ export async function deployToChain(
       }
 
       // Inject version script if versioning is enabled AND inscription origin is known
-      // Note: On FIRST deployments, finalVersioningContract is undefined, so script won't be injected.
-      // This is acceptable because:
-      //   - First deployment: Only one version exists, version redirects are meaningless
-      //   - Subsequent deployments: Multiple versions exist, script enables ?version= functionality
-      // The inscription origin will be set after this inscription completes, and will be used for subsequent deployments.
+      // The finalVersioningContract is now deployed BEFORE HTML inscription (Step 1.9),
+      // so it's always available for script injection on both first and subsequent deployments
       if (enableVersioning && finalVersioningContract) {
         content = await injectVersionScript(
           content,
-          finalVersioningContract, // This is the inscription origin outpoint
-          primaryContentUrl
+          finalVersioningContract // This is the inscription origin outpoint
         );
 
         if (dryRun) {
@@ -351,60 +393,68 @@ export async function deployToChain(
     throw new Error('No index.html found in build directory');
   }
 
-  // Step 3: Deploy versioning inscription with actual origin (only for first deployment)
-  // OR update versioning inscription by spending previous one (for updates)
+  // Step 3: Update versioning inscription with version metadata
   //
   // TWO DEPLOYMENT PATHS:
   // 1. FIRST DEPLOYMENT (no --versioning-contract flag):
-  //    - finalVersioningContract is undefined during inscription
-  //    - Versioning inscription is deployed HERE with entry point as origin
-  //    - Version redirect script was NOT injected (acceptable - only one version exists)
+  //    - Empty versioning inscription was deployed in Step 1.9
+  //    - finalVersioningContract is the origin (empty inscription)
+  //    - Now we spend it to add the first version metadata
   //
   // 2. SUBSEQUENT DEPLOYMENT (--versioning-contract flag provided):
-  //    - finalVersioningContract was set from CLI flag during inscription
-  //    - Version redirect script WAS injected into index.html
-  //    - New version is added to existing inscription by spending it
+  //    - finalVersioningContract = versioningContract (origin from CLI)
+  //    - We spend the latest inscription in the chain to add new version metadata
   let latestVersioningInscription: string | undefined;
 
-  if (enableVersioning && version) {
-    callbacks?.onVersioningContractStart?.();
-
+  if (enableVersioning && version && finalVersioningContract) {
     if (!versioningContract) {
-      // PATH 1: FIRST DEPLOYMENT - Deploy versioning inscription with initial version
+      // PATH 1: FIRST DEPLOYMENT - Update the empty inscription we deployed in Step 1.9
       if (dryRun) {
-        // DRY RUN MODE - Create mock versioning inscription
-        const mockInscriptionTxid =
-          'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
-        finalVersioningContract = `${mockInscriptionTxid}_0`;
-        latestVersioningInscription = finalVersioningContract;
+        // DRY RUN MODE - Mock the update
+        latestVersioningInscription = `${finalVersioningContract.split('_')[0]}_1`; // Mock spending creates new outpoint
       } else if (VERSIONING_ENABLED) {
+        currentInscriptionIndex++;
+        callbacks?.onInscriptionStart?.(
+          'versioning-metadata',
+          currentInscriptionIndex,
+          totalInscriptions
+        );
         try {
           const entryPointOutpoint =
             entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
 
-          finalVersioningContract = await deployVersioningInscription(
+          latestVersioningInscription = await updateVersioningInscription(
+            finalVersioningContract, // Spend the empty inscription we created
             paymentPk,
-            entryPointOutpoint,
-            appName || 'ReactApp',
+            paymentPk, // same key for ordPk
             version,
+            entryPointOutpoint,
             versionDescription || `Version ${version}`,
             destinationAddress,
             satsPerKb
           );
-          // For first deployment, the origin and latest are the same
-          latestVersioningInscription = finalVersioningContract;
+          callbacks?.onInscriptionComplete?.(
+            'versioning-metadata',
+            `/content/${latestVersioningInscription}`
+          );
         } catch (error) {
-          // Inscription deployment failed, but app inscription succeeded
+          // Inscription update failed, but app inscription succeeded
           console.warn(
-            '⚠️  Warning: Versioning inscription deployment failed. App is deployed but version tracking unavailable.'
+            '⚠️  Warning: Failed to update versioning inscription with version metadata.'
           );
           console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
-          finalVersioningContract = undefined;
+          latestVersioningInscription = undefined;
         }
       }
     } else {
       // PATH 2: SUBSEQUENT DEPLOYMENT - Update versioning inscription by spending previous one
       if (!dryRun && VERSIONING_ENABLED) {
+        currentInscriptionIndex++;
+        callbacks?.onInscriptionStart?.(
+          'versioning-metadata',
+          currentInscriptionIndex,
+          totalInscriptions
+        );
         try {
           latestVersioningInscription = await updateVersioningInscription(
             versioningContract, // origin outpoint of versioning inscription chain
@@ -415,6 +465,10 @@ export async function deployToChain(
             versionDescription || `Version ${version}`,
             destinationAddress,
             satsPerKb
+          );
+          callbacks?.onInscriptionComplete?.(
+            'versioning-metadata',
+            `/content/${latestVersioningInscription}`
           );
         } catch (error) {
           // Inscription update failed, but app inscription succeeded
@@ -431,8 +485,6 @@ export async function deployToChain(
         }
       }
     }
-
-    callbacks?.onVersioningContractComplete?.();
   }
 
   callbacks?.onDeploymentComplete?.(entryPoint.urlPath);
