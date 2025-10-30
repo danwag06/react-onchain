@@ -44,7 +44,7 @@ See `src/services/IndexerService.ts` for the base interface and `src/services/go
 No installation needed! Just use `npx`:
 
 ```bash
-npx react-onchain deploy --build-dir ./dist --payment-key <WIF> --destination <ORD_ADDRESS>
+npx react-onchain deploy --build-dir ./dist --payment-key <WIF>
 ```
 
 **For developers/contributors:**
@@ -81,12 +81,15 @@ npm run build && npm run export
 
 ### 2. Deploy to blockchain
 
+**⚠️ Important:** Use a wallet that supports 1Sat Ordinals (we recommend [yours.org](https://yours.org)) to ensure your inscription UTXOs aren't accidentally spent. Regular wallets may not recognize 1-satoshi ordinal outputs and could spend them as regular funds.
+
 ```bash
 npx react-onchain deploy \
   --build-dir ./dist \
-  --payment-key <YOUR_WIF_PRIVATE_KEY> \
-  --destination <YOUR_ORDINAL_ADDRESS>
+  --payment-key <YOUR_WIF_PRIVATE_KEY>
 ```
+
+The destination address is automatically derived from your payment key.
 
 ### 3. Visit your app
 
@@ -104,7 +107,7 @@ npx react-onchain deploy \
   --version-description "Bug fixes and improvements"
 ```
 
-All other configuration (payment key, destination address, build directory, versioning contract) is automatically loaded from `.env` and `deployment-manifest.json`.
+All other configuration (payment key, build directory, versioning contract) is automatically loaded from `.env` and `deployment-manifest.json`. The destination address is automatically derived from your payment key.
 
 ## CLI Usage
 
@@ -127,17 +130,16 @@ npx react-onchain manifest:history
 
 ### Deploy Options
 
-| Option                             | Alias | Description                                     | Default  |
-| ---------------------------------- | ----- | ----------------------------------------------- | -------- |
-| `--build-dir <directory>`          | `-b`  | Build directory to deploy                       | `./dist` |
-| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format               | Required |
-| `--destination <ordAddress>`       | `-d`  | Destination ord address for inscriptions        | Required |
-| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                        | `1`      |
-| `--dry-run`                        |       | Test deployment without broadcasting            | `false`  |
-| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")              | Optional |
-| `--version-description <string>`   |       | Changelog or release notes                      | Optional |
-| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin          | Optional |
-| `--app-name <string>`              |       | Application name for new versioning inscription | Optional |
+| Option                             | Alias | Description                                           | Default  |
+| ---------------------------------- | ----- | ----------------------------------------------------- | -------- |
+| `--build-dir <directory>`          | `-b`  | Build directory to deploy                             | `./dist` |
+| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format (destination auto-derived) | Required |
+| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                              | `1`      |
+| `--dry-run`                        |       | Test deployment without broadcasting                  | `false`  |
+| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")                    | Optional |
+| `--version-description <string>`   |       | Changelog or release notes                            | Optional |
+| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin                | Optional |
+| `--app-name <string>`              |       | Application name for new versioning inscription       | Optional |
 
 **Note:** After your first deployment, a `.env` file is auto-created with your configuration. Most options can then be omitted from the CLI and will be loaded automatically from `.env` and `deployment-manifest.json`.
 
@@ -148,8 +150,7 @@ npx react-onchain manifest:history
 ```bash
 npx react-onchain deploy \
   --build-dir ./dist \
-  --payment-key L1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z \
-  --destination 1YourBSVAddressHere
+  --payment-key L1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z
 ```
 
 **Dry run (test without spending):**
@@ -158,7 +159,6 @@ npx react-onchain deploy \
 npx react-onchain deploy \
   --build-dir ./dist \
   --payment-key L1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z \
-  --destination 1YourOrdAddressHere \
   --dry-run
 ```
 
@@ -168,7 +168,6 @@ npx react-onchain deploy \
 npx react-onchain deploy \
   --build-dir ./dist \
   --payment-key <YOUR_WIF> \
-  --destination <YOUR_ORDINAL_ADDRESS> \
   --sats-per-kb 100
 ```
 
@@ -242,13 +241,12 @@ Deploy your first version and create a versioning inscription:
 npx react-onchain deploy \
   --build-dir ./dist \
   --payment-key <WIF> \
-  --destination <ORD_ADDRESS> \
   --version-tag "1.0.0" \
   --version-description "Initial release" \
   --app-name "MyDApp"
 ```
 
-After deployment, a `.env` file is automatically created containing all your configuration (payment key, destination address, build directory, and versioning contract). This file is in `.gitignore` to protect your private keys.
+After deployment, a `.env` file is automatically created containing all your configuration (payment key, build directory, and versioning contract). The destination address is automatically derived from your payment key. This file is in `.gitignore` to protect your private keys.
 
 ### Subsequent Deployments
 

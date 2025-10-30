@@ -53,10 +53,8 @@ export interface DependencyNode {
 export interface DeploymentConfig {
   /** Build directory to deploy */
   buildDir: string;
-  /** Payment private key (WIF format) */
+  /** Payment private key (WIF format) - destination address is automatically derived from this key */
   paymentKey: string;
-  /** Destination address for inscriptions */
-  destinationAddress: string;
   /** Optional change address */
   changeAddress?: string;
   /** Satoshis per KB for fees */
@@ -107,7 +105,7 @@ export interface DeploymentResult {
   versionDescription?: string;
   /** Build directory used */
   buildDir?: string;
-  /** Destination address used */
+  /** Destination address used (derived from payment key) */
   destinationAddress?: string;
   /** Content service URL used */
   ordinalContentUrl?: string;

@@ -98,16 +98,6 @@ export async function deployVersioningInscription(
         // Get payment address from key
         const paymentAddress = paymentKey.toAddress().toString();
 
-        // Validate that destination matches payment address for versioning to work
-        if (destinationAddress !== paymentAddress) {
-          console.warn('\n⚠️  Warning: Destination address differs from payment key address.');
-          console.warn(
-            '   For versioning to work on subsequent deployments, you must use the payment key associated with the destination address.\n'
-          );
-          console.warn(`   Payment key address: ${paymentAddress}`);
-          console.warn(`   Destination address: ${destinationAddress}\n`);
-        }
-
         // Fetch payment UTXOs (filtering for 'pay' type to exclude ordinals)
         const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined, 'pay');
 

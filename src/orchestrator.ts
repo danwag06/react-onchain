@@ -39,7 +39,6 @@ export async function deployToChain(
   const {
     buildDir,
     paymentKey,
-    destinationAddress,
     satsPerKb,
     dryRun,
     enableVersioning,
@@ -62,6 +61,9 @@ export async function deployToChain(
   } else {
     paymentPk = PrivateKey.fromWif(paymentKey);
   }
+
+  // Derive destination address from payment key
+  const destinationAddress = paymentPk.toAddress().toString();
 
   // Create IndexerService for blockchain operations
   const indexer = createIndexer(ordinalIndexerUrl);
