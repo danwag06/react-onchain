@@ -3,21 +3,15 @@ import { existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
-import { rewriteFile, injectVersionScript, injectServiceResolverScript } from './rewriter.js';
+import { rewriteFile, injectVersionScript } from './rewriter.js';
 import { inscribeFile } from './inscriber.js';
 import {
-  deployVersioningContract,
-  addVersionToContract,
+  deployVersioningInscription,
+  updateVersioningInscription,
   checkVersionExists,
   VERSIONING_ENABLED,
-} from './versioningContractHandler.js';
-import {
-  getAllOrdinalContentServices,
-  getAllIndexerConfigs,
-  createIndexer,
-  config as envConfig,
-} from './config.js';
-import { OrdiProvider } from './OrdiProvider.js';
+} from './versioningInscriptionHandler.js';
+import { createIndexer, config as envConfig } from './config.js';
 import type {
   DeploymentConfig,
   DeploymentResult,
@@ -25,7 +19,6 @@ import type {
   DeploymentManifestHistory,
   InscribedFile,
 } from './types.js';
-import { bsv } from 'scrypt-ts';
 
 export interface OrchestratorCallbacks {
   onAnalysisStart?: () => void;
@@ -58,16 +51,10 @@ export async function deployToChain(
     appName,
     ordinalContentUrl,
     ordinalIndexerUrl,
-    enableServiceResolver,
   } = config;
 
   // Get service URLs (use config override or fall back to env/defaults)
   const primaryContentUrl = ordinalContentUrl || envConfig.ordinalContentUrl;
-  const shouldEnableServiceResolver = enableServiceResolver ?? envConfig.enableServiceResolver;
-
-  // Get all known services for fallback
-  const allContentServices = getAllOrdinalContentServices(primaryContentUrl);
-  const allIndexerConfigs = getAllIndexerConfigs();
 
   // Parse payment key (skip in dry-run mode)
   let paymentPk: PrivateKey;
@@ -78,10 +65,8 @@ export async function deployToChain(
     paymentPk = PrivateKey.fromWif(paymentKey);
   }
 
-  // Create IndexerService and OrdiProvider for broadcasting transactions
+  // Create IndexerService for blockchain operations
   const indexer = createIndexer(ordinalIndexerUrl);
-  const provider = new OrdiProvider(bsv.Networks.mainnet, indexer, satsPerKb);
-  await provider.connect();
 
   // Step 1: Analyze the build directory
   callbacks?.onAnalysisStart?.();
@@ -92,20 +77,16 @@ export async function deployToChain(
     throw new Error(`No files found in build directory: ${buildDir}`);
   }
 
-  // Step 1.5: Setup versioning variables (deployment happens AFTER inscriptions)
-  // Note: For FIRST deployments (no --versioning-contract flag), finalVersioningContract will be undefined
-  // until AFTER inscriptions complete. This is because the contract needs the entry point outpoint,
-  // which we only know after inscribing index.html.
-  //
-  // Consequence: First deployments will NOT have the version redirect script injected into index.html.
-  // This is acceptable because there's only one version, so version redirects are meaningless.
-  // Subsequent deployments WILL have the script because finalVersioningContract is known upfront.
-  let finalVersioningContract = versioningContract;
+  // Step 1.5: Setup versioning variables (inscription deployment happens AFTER file inscriptions)
+  // Note: For inscription-based versioning, we always inject the version redirect script.
+  // On FIRST deployments: The script will use the entry point outpoint as the inscription origin.
+  // On SUBSEQUENT deployments: The script will use the existing inscription origin from manifest.
+  // The version redirect script gracefully handles cases where no inscription metadata exists yet.
+  let finalVersioningContract = versioningContract; // Note: field name kept for compatibility, but stores inscription origin
   let changeUtxo: any = undefined; // Track change from previous transaction
 
   // Step 1.6: Check manifest for duplicate version (LOCAL CHECK - always run if versioning enabled)
-  // This prevents deploying the same version multiple times locally, which would create
-  // duplicate contracts or waste satoshis on re-inscription
+  // This prevents deploying the same version multiple times locally, which would waste satoshis on re-inscription
   const manifestPath = 'deployment-manifest.json';
   if (enableVersioning && version && existsSync(manifestPath)) {
     try {
@@ -129,9 +110,11 @@ export async function deployToChain(
       }
 
       if (existingVersions.includes(version)) {
+        const lastNumberInVersion = version.split('.').pop();
+        const newVersion = `${version.split('.').slice(0, -1).join('.')}.${Number(lastNumberInVersion) + 1}`;
         throw new Error(
           `Version "${version}" already exists in local manifest.\n` +
-            `  Please use a different version tag (e.g., "${version}.1" or increment the version number).\n` +
+            `  Please use a different version tag (e.g., "${newVersion}" or increment the version number).\n` +
             `  Existing versions: ${existingVersions.join(', ')}`
         );
       }
@@ -144,14 +127,14 @@ export async function deployToChain(
     }
   }
 
-  // Step 1.7: Validate version doesn't exist in smart contract (ON-CHAIN CHECK - subsequent deployments only)
-  // This prevents wasting satoshis on inscription when the version already exists in the contract.
+  // Step 1.7: Validate version doesn't exist in inscription metadata (ON-CHAIN CHECK - subsequent deployments only)
+  // This prevents wasting satoshis on inscription when the version already exists in the metadata.
   // Skip this check for:
-  //   - First deployments (versioningContract is undefined)
+  //   - First deployments (versioningContract/inscription origin is undefined)
   //   - Dry-run mode (don't hit the network)
   if (versioningContract && enableVersioning && version && !dryRun && VERSIONING_ENABLED) {
     try {
-      await checkVersionExists(versioningContract, version);
+      await checkVersionExists(versioningContract, version, primaryContentUrl);
     } catch (error) {
       // Version exists or other error - fail fast before inscribing anything
       throw new Error(
@@ -258,14 +241,14 @@ export async function deployToChain(
         ...previousInscription,
         // Keep original contentHash and dependencyHash
       });
-      urlMap.set(filePath, previousInscription.url);
+      urlMap.set(filePath, previousInscription.urlPath);
       txids.add(previousInscription.txid);
       totalSize += previousInscription.size;
 
       // Reset change UTXO since we're not creating a transaction
       changeUtxo = undefined;
 
-      callbacks?.onInscriptionSkipped?.(filePath, previousInscription.url);
+      callbacks?.onInscriptionSkipped?.(filePath, previousInscription.urlPath);
       continue;
     }
 
@@ -286,25 +269,17 @@ export async function deployToChain(
         content = await readFile(absolutePath, 'utf-8');
       }
 
-      // Inject service resolver script if enabled
-      if (shouldEnableServiceResolver) {
-        content = await injectServiceResolverScript(content, allContentServices, primaryContentUrl);
-      }
-
-      // Inject version script if versioning is enabled AND contract is known
-      // IMPORTANT: This check will FAIL on first deployments because finalVersioningContract is undefined.
-      // The version redirect script will only be injected on SUBSEQUENT deployments when the contract
-      // outpoint is provided via --versioning-contract flag. This is by design:
-      //   - First deployment: No other versions exist, so version redirects are unnecessary
-      //   - Subsequent deployments: Multiple versions exist, version redirect script enables ?version= functionality
+      // Inject version script if versioning is enabled AND inscription origin is known
+      // Note: On FIRST deployments, finalVersioningContract is undefined, so script won't be injected.
+      // This is acceptable because:
+      //   - First deployment: Only one version exists, version redirects are meaningless
+      //   - Subsequent deployments: Multiple versions exist, script enables ?version= functionality
+      // The inscription origin will be set after this inscription completes, and will be used for subsequent deployments.
       if (enableVersioning && finalVersioningContract) {
-        // Inject the version redirect script
-        // Note: The origin outpoint is read from the contract state, not injected
         content = await injectVersionScript(
           content,
-          finalVersioningContract,
-          allIndexerConfigs,
-          allContentServices
+          finalVersioningContract, // This is the inscription origin outpoint
+          primaryContentUrl
         );
 
         if (dryRun) {
@@ -321,12 +296,11 @@ export async function deployToChain(
       fileRef.contentType,
       destinationAddress,
       paymentPk,
-      provider,
+      indexer,
       content,
       satsPerKb,
       dryRun,
-      changeUtxo,
-      primaryContentUrl
+      changeUtxo
     );
 
     // Compute dependency hash for files with dependencies
@@ -348,7 +322,7 @@ export async function deployToChain(
     };
 
     inscriptions.push(inscribedFile);
-    urlMap.set(filePath, result.inscription.url);
+    urlMap.set(filePath, result.inscription.urlPath);
     txids.add(result.inscription.txid);
 
     // Update change UTXO for next iteration
@@ -357,7 +331,7 @@ export async function deployToChain(
     // Track total size
     totalSize += result.inscription.size;
 
-    callbacks?.onInscriptionComplete?.(filePath, result.inscription.url);
+    callbacks?.onInscriptionComplete?.(filePath, result.inscription.urlPath);
 
     // Estimate cost (rough approximation)
     totalCost += Math.ceil(((result.inscription.size + 200) / 1000) * (satsPerKb || 50)) + 1;
@@ -377,71 +351,83 @@ export async function deployToChain(
     throw new Error('No index.html found in build directory');
   }
 
-  // Step 3: Deploy versioning contract with actual origin (only for first deployment)
-  // OR add version to existing contract (for updates)
+  // Step 3: Deploy versioning inscription with actual origin (only for first deployment)
+  // OR update versioning inscription by spending previous one (for updates)
   //
   // TWO DEPLOYMENT PATHS:
   // 1. FIRST DEPLOYMENT (no --versioning-contract flag):
   //    - finalVersioningContract is undefined during inscription
-  //    - Contract is deployed HERE with entry point as origin
+  //    - Versioning inscription is deployed HERE with entry point as origin
   //    - Version redirect script was NOT injected (acceptable - only one version exists)
   //
   // 2. SUBSEQUENT DEPLOYMENT (--versioning-contract flag provided):
   //    - finalVersioningContract was set from CLI flag during inscription
   //    - Version redirect script WAS injected into index.html
-  //    - New version is added to existing contract HERE
+  //    - New version is added to existing inscription by spending it
+  let latestVersioningInscription: string | undefined;
+
   if (enableVersioning && version) {
     callbacks?.onVersioningContractStart?.();
 
     if (!versioningContract) {
-      // PATH 1: FIRST DEPLOYMENT - Deploy contract with initial version
+      // PATH 1: FIRST DEPLOYMENT - Deploy versioning inscription with initial version
       if (dryRun) {
-        // DRY RUN MODE - Create mock versioning contract
-        const mockContractTxid = 'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
-        finalVersioningContract = `${mockContractTxid}_0`;
+        // DRY RUN MODE - Create mock versioning inscription
+        const mockInscriptionTxid =
+          'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
+        finalVersioningContract = `${mockInscriptionTxid}_0`;
+        latestVersioningInscription = finalVersioningContract;
       } else if (VERSIONING_ENABLED) {
         try {
           const entryPointOutpoint =
-            entryPoint.url.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
+            entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
 
-          finalVersioningContract = await deployVersioningContract(
+          finalVersioningContract = await deployVersioningInscription(
             paymentPk,
             entryPointOutpoint,
             appName || 'ReactApp',
             version,
             versionDescription || `Version ${version}`,
+            destinationAddress,
             satsPerKb
           );
+          // For first deployment, the origin and latest are the same
+          latestVersioningInscription = finalVersioningContract;
         } catch (error) {
-          // Contract deployment failed, but app inscription succeeded
+          // Inscription deployment failed, but app inscription succeeded
           console.warn(
-            '⚠️  Warning: Contract deployment failed. App is deployed but version tracking unavailable.'
+            '⚠️  Warning: Versioning inscription deployment failed. App is deployed but version tracking unavailable.'
           );
           console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
           finalVersioningContract = undefined;
         }
       }
     } else {
-      // PATH 2: SUBSEQUENT DEPLOYMENT - Add version to existing contract
+      // PATH 2: SUBSEQUENT DEPLOYMENT - Update versioning inscription by spending previous one
       if (!dryRun && VERSIONING_ENABLED) {
         try {
-          await addVersionToContract(
-            versioningContract,
+          latestVersioningInscription = await updateVersioningInscription(
+            versioningContract, // origin outpoint of versioning inscription chain
             paymentPk,
+            paymentPk, // same key for ordPk
             version,
-            entryPoint.url.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout,
+            entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout,
             versionDescription || `Version ${version}`,
+            destinationAddress,
             satsPerKb
           );
         } catch (error) {
-          // Contract update failed, but app inscription succeeded
+          // Inscription update failed, but app inscription succeeded
           console.warn(
-            '⚠️  Warning: Failed to add version to contract. App is deployed but version tracking failed.'
+            '⚠️  Warning: Failed to update versioning inscription. App is deployed but version tracking failed.'
           );
           console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
           console.warn(
-            `   Possible causes: Wrong payment key, contract doesn't exist, or network issue.`
+            `   This likely means the payment key does not control the versioning inscription.`
           );
+          console.warn(`   Original inscription sent to: ${destinationAddress}`);
+          console.warn(`   Current payment key controls: ${paymentPk.toAddress().toString()}`);
+          console.warn(`   Solution: Use the same payment key for all deployments.`);
         }
       }
     }
@@ -449,19 +435,21 @@ export async function deployToChain(
     callbacks?.onVersioningContractComplete?.();
   }
 
-  callbacks?.onDeploymentComplete?.(entryPoint.url);
+  callbacks?.onDeploymentComplete?.(entryPoint.urlPath);
 
   return {
-    entryPointUrl: entryPoint.url,
+    entryPointUrl: entryPoint.urlPath,
     inscriptions,
     totalCost,
     totalSize,
     txids: Array.from(txids),
     versioningContract: finalVersioningContract,
+    latestVersioningInscription,
     version: version,
     versionDescription: versionDescription,
     buildDir,
     destinationAddress,
+    ordinalContentUrl: primaryContentUrl,
   };
 }
 
@@ -477,11 +465,12 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     totalCost: result.totalCost,
     totalSize: result.totalSize,
     transactions: result.txids,
-    versioningContract: result.versioningContract,
+    latestVersioningInscription: result.latestVersioningInscription,
     version: result.version,
     versionDescription: result.versionDescription,
     buildDir: result.buildDir,
     destinationAddress: result.destinationAddress,
+    ordinalContentUrl: result.ordinalContentUrl,
   };
 }
 
@@ -521,18 +510,26 @@ export async function saveManifestWithHistory(
         history.deployments.push(manifest);
         history.totalDeployments = history.deployments.length;
 
-        // Update shared versioning contract if present
-        if (manifest.versioningContract) {
-          history.versioningContract = manifest.versioningContract;
+        // Keep existing versioningInscription (origin) - it never changes
+        // Only set it if not already set and this deployment has one
+        if (!history.versioningInscription && manifest.latestVersioningInscription) {
+          history.versioningInscription = manifest.latestVersioningInscription;
         }
       } else if ('timestamp' in parsed && 'entryPoint' in parsed) {
         // Old format - migrate to new format
         const oldManifest = parsed as DeploymentManifest;
+
+        // Migrate old versioningContract field to latestVersioningInscription for backward compatibility
+        const migratedOldManifest = {
+          ...oldManifest,
+          latestVersioningInscription: '',
+        };
+
         history = {
           manifestVersion: '1.0.0',
-          versioningContract: oldManifest.versioningContract,
+          versioningInscription: manifest.latestVersioningInscription,
           totalDeployments: 2, // Old deployment + new deployment
-          deployments: [oldManifest, manifest],
+          deployments: [migratedOldManifest, manifest],
         };
       } else {
         // Unknown format - start fresh
@@ -562,7 +559,7 @@ export async function saveManifestWithHistory(
 function createNewHistory(manifest: DeploymentManifest): DeploymentManifestHistory {
   return {
     manifestVersion: '1.0.0',
-    versioningContract: manifest.versioningContract,
+    versioningInscription: manifest.latestVersioningInscription,
     totalDeployments: 1,
     deployments: [manifest],
   };

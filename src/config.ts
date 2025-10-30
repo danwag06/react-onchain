@@ -25,7 +25,6 @@ export const DEFAULT_CONFIG = {
   // Ordinals service configuration (from primary indexer)
   ordinalContentUrl: BROWSER_INDEXER_CONFIGS[0].contentUrl,
   ordinalIndexerUrl: BROWSER_INDEXER_CONFIGS[0].baseUrl,
-  enableServiceResolver: true,
 
   // Transaction settings
   satsPerKb: 1,
@@ -73,10 +72,6 @@ export const config = {
   // Ordinals service configuration
   ordinalContentUrl: getEnvOrDefault('ORDINAL_CONTENT_URL', DEFAULT_CONFIG.ordinalContentUrl),
   ordinalIndexerUrl: getEnvOrDefault('ORDINAL_INDEXER_URL', DEFAULT_CONFIG.ordinalIndexerUrl),
-  enableServiceResolver: getEnvOrDefault(
-    'ENABLE_SERVICE_RESOLVER',
-    DEFAULT_CONFIG.enableServiceResolver
-  ),
 
   // Transaction settings
   satsPerKb: getEnvOrDefault('SATS_PER_KB', DEFAULT_CONFIG.satsPerKb),

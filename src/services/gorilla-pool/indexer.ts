@@ -54,7 +54,6 @@ export class GorillaPoolIndexer extends IndexerService {
    * Endpoint: POST /tx
    */
   async broadcastTransaction(rawTxHex: string): Promise<string> {
-    console.log(rawTxHex);
     const url = `${this.baseUrl}/tx`;
 
     try {
@@ -82,27 +81,6 @@ export class GorillaPoolIndexer extends IndexerService {
   }
 
   /**
-   * Get transaction by ID
-   * Endpoint: GET /tx/{txid}/raw
-   */
-  async getTransaction(txid: string): Promise<TransactionResponse> {
-    const url = `${this.baseUrl}/tx/${txid}/raw`;
-
-    try {
-      // Get raw binary transaction data
-      const response = await superagent.get(url).responseType('blob');
-      const buffer = Buffer.from(response.body);
-      const hexString = buffer.toString('hex');
-      return new bsv.Transaction(hexString);
-    } catch (error) {
-      console.error(`Failed to fetch transaction ${txid}:`, error);
-      throw new Error(
-        `Transaction fetch failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-  }
-
-  /**
    * List unspent UTXOs for an address
    * Endpoint: GET /api/txos/address/{address}/unspent
    *
@@ -110,8 +88,16 @@ export class GorillaPoolIndexer extends IndexerService {
    * Otherwise returns all available UTXOs.
    *
    * Uses pagination to fetch all available UTXOs across multiple API calls if needed.
+   *
+   * @param address - Bitcoin address
+   * @param options - Query options (optional)
+   * @param type - Filter by UTXO type: 'pay' (>1 sat), 'ordinal' (1 sat), or undefined (all)
    */
-  async listUnspent(address: string, options?: UtxoQueryOptions): Promise<UTXO[]> {
+  async listUnspent(
+    address: string,
+    options?: UtxoQueryOptions,
+    type?: 'pay' | 'ordinal'
+  ): Promise<UTXO[]> {
     const limit = 100; // GorillaPool API pagination limit
     let offset = 0;
     let allSpendableUtxos: UTXO[] = [];
@@ -148,9 +134,19 @@ export class GorillaPoolIndexer extends IndexerService {
         })
       ) as UTXO[];
 
-      // Filter out ordinal UTXOs (1 sat) - those are inscriptions, not spendable for fees
-      const spendableBatch = batchUtxos.filter((u: UTXO) => u.satoshis > 1);
-      allSpendableUtxos.push(...spendableBatch);
+      // Filter based on type parameter
+      let filteredBatch: UTXO[];
+      if (type === 'pay') {
+        // Payment UTXOs: filter for >1 sat (exclude ordinal inscriptions)
+        filteredBatch = batchUtxos.filter((u: UTXO) => u.satoshis > 1);
+      } else if (type === 'ordinal') {
+        // Ordinal UTXOs: filter for exactly 1 sat (inscriptions)
+        filteredBatch = batchUtxos.filter((u: UTXO) => u.satoshis === 1);
+      } else {
+        // No filter: return all UTXOs
+        filteredBatch = batchUtxos;
+      }
+      allSpendableUtxos.push(...filteredBatch);
 
       // If options provided, check if we have enough funds
       if (options) {
@@ -195,32 +191,5 @@ export class GorillaPoolIndexer extends IndexerService {
     throw new Error(
       `Insufficient funds: need ${requiredSats} sats, but only ${totalAvailable} available across ${allSpendableUtxos.length} UTXOs`
     );
-  }
-
-  /**
-   * Get balance for an address
-   * Endpoint: GET /api/txos/address/{address}/balance?refresh=false
-   *
-   * Note: GorillaPool API returns a plain number representing the total balance
-   */
-  async getBalance(address: string): Promise<{ confirmed: number; unconfirmed: number }> {
-    const url = `${this.baseUrl}/txos/address/${address}/balance?refresh=false`;
-
-    try {
-      const response = await superagent.get(url);
-      const balance =
-        typeof response.body === 'number' ? response.body : parseInt(response.body, 10);
-
-      // GorillaPool returns total balance only, so treat it all as confirmed
-      return {
-        confirmed: balance || 0,
-        unconfirmed: 0,
-      };
-    } catch (error) {
-      console.error(`Failed to fetch balance for address ${address}:`, error);
-      throw new Error(
-        `Balance fetch failed: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
   }
 }

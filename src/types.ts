@@ -26,8 +26,8 @@ export interface InscribedFile {
   txid: string;
   /** Output index */
   vout: number;
-  /** Full ordfs.network URL */
-  url: string;
+  /** URL path for the inscription (e.g., "/content/txid_vout") */
+  urlPath: string;
   /** File size in bytes */
   size: number;
   /** SHA256 hash of original file content (before rewriting) - optional for backward compatibility */
@@ -69,8 +69,6 @@ export interface DeploymentConfig {
   ordinalContentUrl?: string;
   /** Ordinal indexer API URL for version queries */
   ordinalIndexerUrl?: string;
-  /** Enable service resolver script injection */
-  enableServiceResolver?: boolean;
 
   // Versioning options
   /** Enable versioning for this deployment */
@@ -79,9 +77,9 @@ export interface DeploymentConfig {
   version?: string;
   /** Version description/changelog */
   versionDescription?: string;
-  /** Existing versioning contract outpoint (txid_vout) */
+  /** Existing versioning inscription origin outpoint (txid_vout) */
   versioningContract?: string;
-  /** App name for new versioning contract */
+  /** App name for new versioning inscription */
   appName?: string;
 }
 
@@ -99,8 +97,10 @@ export interface DeploymentResult {
   txids: string[];
   /** Total size in bytes */
   totalSize: number;
-  /** Versioning contract outpoint (if versioning enabled) */
+  /** Versioning inscription origin outpoint (if versioning enabled) */
   versioningContract?: string;
+  /** Latest versioning inscription outpoint after this deployment (if updated) */
+  latestVersioningInscription?: string;
   /** Version deployed (if versioning enabled) */
   version?: string;
   /** Version description/changelog (if versioning enabled) */
@@ -109,6 +109,8 @@ export interface DeploymentResult {
   buildDir?: string;
   /** Destination address used */
   destinationAddress?: string;
+  /** Content service URL used */
+  ordinalContentUrl?: string;
 }
 
 /**
@@ -122,8 +124,8 @@ export interface DeploymentManifest {
   totalCost: number;
   totalSize: number;
   transactions: string[];
-  /** Versioning contract outpoint (if versioning enabled) */
-  versioningContract?: string;
+  /** Latest versioning inscription outpoint after this deployment (if updated) */
+  latestVersioningInscription?: string;
   /** Version deployed (if versioning enabled) */
   version?: string;
   /** Version description/changelog (if versioning enabled) */
@@ -132,6 +134,8 @@ export interface DeploymentManifest {
   buildDir?: string;
   /** Destination address used for inscriptions */
   destinationAddress?: string;
+  /** Content service URL used for this deployment */
+  ordinalContentUrl?: string;
 }
 
 /**
@@ -142,8 +146,8 @@ export interface DeploymentManifestHistory {
   manifestVersion: string;
   /** Optional project name/identifier */
   projectName?: string;
-  /** Shared versioning contract outpoint (if versioning enabled) */
-  versioningContract?: string;
+  /** Origin outpoint of the versioning inscription chain (if versioning enabled) */
+  versioningInscription?: string;
   /** Total number of deployments */
   totalDeployments: number;
   /** Array of all deployments (chronological order) */

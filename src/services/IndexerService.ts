@@ -7,6 +7,9 @@
 
 import type { UTXO, TransactionResponse, UtxoQueryOptions } from 'scrypt-ts';
 
+// Re-export types for use by other modules
+export type { UTXO, TransactionResponse, UtxoQueryOptions };
+
 /**
  * Browser-compatible indexer configuration
  *
@@ -71,29 +74,18 @@ export abstract class IndexerService {
   abstract broadcastTransaction(rawTxHex: string): Promise<string>;
 
   /**
-   * Get transaction data by transaction ID
-   *
-   * @param txid - Transaction ID
-   * @returns Transaction response data
-   */
-  abstract getTransaction(txid: string): Promise<TransactionResponse>;
-
-  /**
    * List unspent transaction outputs for an address
    *
    * @param address - Bitcoin address
    * @param options - Query options (optional)
+   * @param type - Filter by UTXO type: 'pay' (>1 sat), 'ordinal' (1 sat), or undefined (all)
    * @returns Array of unspent UTXOs
    */
-  abstract listUnspent(address: string, options?: UtxoQueryOptions): Promise<UTXO[]>;
-
-  /**
-   * Get balance for an address
-   *
-   * @param address - Bitcoin address
-   * @returns Balance with confirmed and unconfirmed amounts in satoshis
-   */
-  abstract getBalance(address: string): Promise<{ confirmed: number; unconfirmed: number }>;
+  abstract listUnspent(
+    address: string,
+    options?: UtxoQueryOptions,
+    type?: 'pay' | 'ordinal'
+  ): Promise<UTXO[]>;
 
   /**
    * Get the base URL for this indexer service

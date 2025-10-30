@@ -3,27 +3,19 @@ import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
 import type { BrowserIndexerConfig } from './services/IndexerService.js';
 
-// Script template paths
+// Script template path
 const VERSION_REDIRECT_SCRIPT_PATH = join(
   import.meta.dirname || __dirname,
   'versionRedirect.template.js'
 );
-const SERVICE_RESOLVER_SCRIPT_PATH = join(
-  import.meta.dirname || __dirname,
-  'serviceResolver.template.js'
-);
-const CONTRACT_ARTIFACT_PATH = join(
-  import.meta.dirname || __dirname,
-  '../artifacts/contracts/reactOnchainVersioning.json'
-);
 
 /**
- * Creates a mapping of original paths to ordfs URLs
+ * Creates a mapping of original paths to inscription URL paths
  */
 export function createUrlMap(inscriptions: InscribedFile[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const inscription of inscriptions) {
-    map.set(inscription.originalPath, inscription.url);
+    map.set(inscription.originalPath, inscription.urlPath);
   }
   return map;
 }
@@ -75,10 +67,10 @@ export async function rewriteHtml(
 
       try {
         const resolvedPath = resolveReference(url, originalPath, baseDir);
-        const ordfsUrl = urlMap.get(resolvedPath);
+        const contentUrl = urlMap.get(resolvedPath);
 
-        if (ordfsUrl) {
-          return `${before}${ordfsUrl}${after}`;
+        if (contentUrl) {
+          return `${before}${contentUrl}${after}`;
         }
       } catch (error) {
         console.warn(`Could not resolve reference ${url} in ${originalPath}`);
@@ -111,10 +103,10 @@ export async function rewriteCss(
 
     try {
       const resolvedPath = resolveReference(url, originalPath, baseDir);
-      const ordfsUrl = urlMap.get(resolvedPath);
+      const contentUrl = urlMap.get(resolvedPath);
 
-      if (ordfsUrl) {
-        return `url("${ordfsUrl}")`;
+      if (contentUrl) {
+        return `url("${contentUrl}")`;
       }
     } catch (error) {
       console.warn(`Could not resolve reference ${url} in ${originalPath}`);
@@ -144,12 +136,12 @@ export async function rewriteJs(
   content = content.replace(assetPattern, (match, ref) => {
     try {
       const resolvedPath = resolveReference(ref, originalPath, baseDir);
-      const ordfsUrl = urlMap.get(resolvedPath);
+      const contentUrl = urlMap.get(resolvedPath);
 
-      if (ordfsUrl) {
+      if (contentUrl) {
         // Preserve the quote style from the original
         const quote = match[0];
-        return `${quote}${ordfsUrl}${quote}`;
+        return `${quote}${contentUrl}${quote}`;
       }
     } catch (error) {
       console.warn(`Could not resolve reference ${ref} in ${originalPath}`);
@@ -163,10 +155,10 @@ export async function rewriteJs(
     if (ref.startsWith('./') || ref.startsWith('../') || ref.startsWith('/')) {
       try {
         const resolvedPath = resolveReference(ref, originalPath, baseDir);
-        const ordfsUrl = urlMap.get(resolvedPath);
+        const contentUrl = urlMap.get(resolvedPath);
 
-        if (ordfsUrl) {
-          return match.replace(ref, ordfsUrl);
+        if (contentUrl) {
+          return match.replace(ref, contentUrl);
         }
       } catch (error) {
         console.warn(`Could not resolve import ${ref} in ${originalPath}`);
@@ -202,66 +194,17 @@ export async function rewriteFile(
 }
 
 /**
- * Injects service resolver script into HTML content
- *
- * @param htmlContent - Original HTML content
- * @param ordinalsServices - Array of ordinals service URLs
- * @param primaryService - Primary service URL
- * @returns Modified HTML with injected script
- */
-export async function injectServiceResolverScript(
-  htmlContent: string,
-  ordinalsServices: string[],
-  primaryService: string
-): Promise<string> {
-  // Read the service resolver script template
-  let scriptContent: string;
-  try {
-    scriptContent = await readFile(SERVICE_RESOLVER_SCRIPT_PATH, 'utf-8');
-  } catch (error) {
-    console.warn('Could not load service resolver script template:', error);
-    return htmlContent;
-  }
-
-  // Replace placeholders
-  scriptContent = scriptContent
-    .replace(/__ORDINALS_SERVICES__/g, JSON.stringify(ordinalsServices))
-    .replace(/__PRIMARY_SERVICE__/g, primaryService);
-
-  // Inject the script into the <head> section
-  const headMatch = htmlContent.match(/<head[^>]*>/i);
-  if (headMatch) {
-    const headTag = headMatch[0];
-    const insertPosition = headMatch.index! + headTag.length;
-
-    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
-
-    return (
-      htmlContent.substring(0, insertPosition) +
-      injectedScript +
-      htmlContent.substring(insertPosition)
-    );
-  } else {
-    // No <head> tag found, inject at the beginning
-    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
-    return injectedScript + htmlContent;
-  }
-}
-
-/**
  * Injects version redirect script into HTML content
  *
  * @param htmlContent - Original HTML content
- * @param versioningContractOutpoint - Outpoint of the versioning contract
- * @param indexerConfigs - Array of browser-compatible indexer configurations
- * @param ordinalsServices - Array of ordinals content service URLs
+ * @param versionInscriptionOrigin - Origin outpoint of the versioning inscription
+ * @param ordinalsContentUrl - Base URL for ordinals service (e.g., https://ordfs.network)
  * @returns Modified HTML with injected script
  */
 export async function injectVersionScript(
   htmlContent: string,
-  versioningContractOutpoint: string,
-  indexerConfigs: BrowserIndexerConfig[],
-  ordinalsServices: string[]
+  versionInscriptionOrigin: string,
+  ordinalsContentUrl: string
 ): Promise<string> {
   // Read the version redirect script template
   let scriptContent: string;
@@ -272,35 +215,10 @@ export async function injectVersionScript(
     return htmlContent;
   }
 
-  // Read the contract artifact JSON
-  let artifactJson: string;
-  try {
-    artifactJson = await readFile(CONTRACT_ARTIFACT_PATH, 'utf-8');
-  } catch (error) {
-    console.warn('Could not load contract artifact:', error);
-    return htmlContent;
-  }
-
-  // Serialize browser indexer configs
-  // Functions need to be converted to strings and reconstructed in browser
-  const serializedConfigs = indexerConfigs.map((config) => ({
-    name: config.name,
-    baseUrl: config.baseUrl,
-    endpoints: {
-      fetchLatestByOrigin: config.endpoints.fetchLatestByOrigin.toString(),
-      getTransaction: config.endpoints.getTransaction.toString(),
-    },
-    parseLatestByOrigin: config.parseLatestByOrigin
-      ? config.parseLatestByOrigin.toString()
-      : undefined,
-  }));
-
-  // Replace placeholders (note: use single replace to avoid issues with global replace)
+  // Replace placeholders
   scriptContent = scriptContent
-    .replace('VERSIONING_CONTRACT_OUTPOINT_PLACEHOLDER', versioningContractOutpoint)
-    .replace('CONTRACT_ARTIFACT_PLACEHOLDER', artifactJson)
-    .replace('INDEXER_CONFIGS_PLACEHOLDER', JSON.stringify(serializedConfigs))
-    .replace('ORDINALS_SERVICES_PLACEHOLDER', JSON.stringify(ordinalsServices));
+    .replace('VERSION_INSCRIPTION_ORIGIN_PLACEHOLDER', versionInscriptionOrigin)
+    .replace('ORDINALS_CONTENT_URL_PLACEHOLDER', ordinalsContentUrl);
 
   // Inject the script into the <head> section
   const headMatch = htmlContent.match(/<head[^>]*>/i);

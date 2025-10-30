@@ -5,8 +5,8 @@ import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
 import { createHash } from 'crypto';
 import { retryWithBackoff, shouldRetryError, isUtxoNotFoundError } from './retryUtils.js';
-import { OrdiProvider } from './OrdiProvider.js';
-import { bsv, type UTXO } from 'scrypt-ts';
+import type { IndexerService, UTXO } from './services/IndexerService.js';
+import { CONTENT_PATH } from './services/gorilla-pool/constants.js';
 
 /**
  * Generates a mock transaction ID for dry-run mode
@@ -17,8 +17,8 @@ function generateMockTxid(filePath: string): string {
 }
 
 /**
- * Convert scrypt-ts UTXO format to js-1sat-ord Utxo format
- * Note: js-1sat-ord expects base64 encoded scripts, scrypt-ts uses hex
+ * Convert IndexerService UTXO format to js-1sat-ord Utxo format
+ * Note: js-1sat-ord expects base64 encoded scripts, IndexerService uses hex
  */
 function convertToJsOrdUtxo(utxo: UTXO): Utxo {
   return {
@@ -38,12 +38,11 @@ export async function inscribeFile(
   contentType: string,
   destinationAddress: string,
   paymentKey: PrivateKey,
-  provider: OrdiProvider,
+  indexer: IndexerService,
   content?: string,
   satsPerKb?: number,
   dryRun?: boolean,
-  paymentUtxo?: Utxo,
-  ordinalContentUrl?: string
+  paymentUtxo?: Utxo
 ): Promise<{ inscription: InscribedFile; changeUtxo?: Utxo }> {
   // Read file content (use provided content if available, otherwise read from file)
   let fileContent: string;
@@ -60,8 +59,8 @@ export async function inscribeFile(
   if (dryRun) {
     const mockTxid = generateMockTxid(originalPath);
     const vout = 0;
-    const contentUrl = ordinalContentUrl || 'https://ordfs.network/content';
-    const url = `${contentUrl}/${mockTxid}_${vout}`;
+    // Use relative URL path for maximum portability across service providers
+    const urlPath = `${CONTENT_PATH}/${mockTxid}_${vout}`;
 
     // Small delay to simulate network activity
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -71,7 +70,7 @@ export async function inscribeFile(
         originalPath,
         txid: mockTxid,
         vout,
-        url,
+        urlPath,
         size: fileSize,
       },
     };
@@ -90,8 +89,7 @@ export async function inscribeFile(
 
   // Fetch UTXOs and build transaction ONCE (outside retry loop)
   let utxos: Utxo[];
-  const paymentAddressStr = paymentKey.toAddress().toString();
-  const paymentAddress = bsv.Address.fromString(paymentAddressStr);
+  const paymentAddress = paymentKey.toAddress().toString();
 
   if (paymentUtxo) {
     // Check if the change UTXO has enough funds
@@ -100,38 +98,38 @@ export async function inscribeFile(
       utxos = [paymentUtxo];
     } else {
       // Change UTXO is insufficient, fetch additional UTXOs
-      const providerUtxos = await provider.listUnspent(paymentAddress, {
+      const indexerUtxos = await indexer.listUnspent(paymentAddress, {
         unspentValue: 1, // 1 sat for inscription output
         estimateSize: estimatedTxSize,
         feePerKb: feeRate,
         additional: 100, // Small buffer
       });
 
-      if (!providerUtxos || providerUtxos.length === 0) {
+      if (!indexerUtxos || indexerUtxos.length === 0) {
         throw new Error(`No additional UTXOs found for payment address ${paymentAddress}`);
       }
 
-      // Convert scrypt-ts UTXOs to js-1sat-ord format
-      const freshUtxos = providerUtxos.map(convertToJsOrdUtxo);
+      // Convert IndexerService UTXOs to js-1sat-ord format
+      const freshUtxos = indexerUtxos.map(convertToJsOrdUtxo);
 
       // Combine change UTXO with fresh UTXOs
       utxos = [paymentUtxo, ...freshUtxos];
     }
   } else {
-    // No change UTXO, fetch UTXOs from provider with funding requirements
-    const providerUtxos = await provider.listUnspent(paymentAddress, {
+    // No change UTXO, fetch UTXOs from indexer with funding requirements
+    const indexerUtxos = await indexer.listUnspent(paymentAddress, {
       unspentValue: 1, // 1 sat for inscription output
       estimateSize: estimatedTxSize,
       feePerKb: feeRate,
       additional: 100, // Small buffer
     });
 
-    if (!providerUtxos || providerUtxos.length === 0) {
+    if (!indexerUtxos || indexerUtxos.length === 0) {
       throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
     }
 
-    // Convert scrypt-ts UTXOs to js-1sat-ord format
-    utxos = providerUtxos.map(convertToJsOrdUtxo);
+    // Convert IndexerService UTXOs to js-1sat-ord format
+    utxos = indexerUtxos.map(convertToJsOrdUtxo);
   }
 
   // Build the inscription transaction ONCE
@@ -153,9 +151,9 @@ export async function inscribeFile(
   // Only retry the broadcast (transaction is already built)
   const txid = await retryWithBackoff(
     async () => {
-      // Broadcast the transaction via OrdiProvider
+      // Broadcast the transaction via IndexerService
       try {
-        const txid = await provider.sendRawTransaction(result.tx.toHex());
+        const txid = await indexer.broadcastTransaction(result.tx.toHex());
         return txid;
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -166,19 +164,19 @@ export async function inscribeFile(
           isUtxoNotFoundError(error instanceof Error ? error : new Error(errorMsg))
         ) {
           // Refetch UTXOs with funding requirements
-          const providerUtxos = await provider.listUnspent(paymentAddress, {
+          const indexerUtxos = await indexer.listUnspent(paymentAddress, {
             unspentValue: 1,
             estimateSize: estimatedTxSize,
             feePerKb: feeRate,
             additional: 100,
           });
 
-          if (!providerUtxos || providerUtxos.length === 0) {
+          if (!indexerUtxos || indexerUtxos.length === 0) {
             throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
           }
 
           // Convert and rebuild transaction with fresh UTXOs
-          utxos = providerUtxos.map(convertToJsOrdUtxo);
+          utxos = indexerUtxos.map(convertToJsOrdUtxo);
 
           result = await createOrdinals({
             utxos,
@@ -225,15 +223,15 @@ export async function inscribeFile(
     }
   }
 
-  const contentUrl = ordinalContentUrl || 'https://ordfs.network/content';
-  const url = `${contentUrl}/${txid}_${vout}`;
+  // Use relative URL path for maximum portability across service providers
+  const urlPath = `${CONTENT_PATH}/${txid}_${vout}`;
 
   return {
     inscription: {
       originalPath,
       txid,
       vout,
-      url,
+      urlPath,
       size: fileSize,
     },
     changeUtxo: payChange,
@@ -252,7 +250,7 @@ export async function inscribeFiles(
   }>,
   destinationAddress: string,
   paymentKey: PrivateKey,
-  provider: OrdiProvider,
+  indexer: IndexerService,
   satsPerKb?: number,
   onProgress?: (current: number, total: number, file: string) => void
 ): Promise<InscribedFile[]> {
@@ -272,7 +270,7 @@ export async function inscribeFiles(
       file.contentType,
       destinationAddress,
       paymentKey,
-      provider,
+      indexer,
       file.content,
       satsPerKb,
       false, // not dry-run

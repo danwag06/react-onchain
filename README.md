@@ -19,7 +19,7 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 - **Complete On-Chain Deployment**: Entire React app lives on the blockchain
 - **Automatic Dependency Resolution**: Analyzes your build and inscribes files in the correct order
 - **Reference Rewriting**: Automatically updates all file references to use ordinals content URLs
-- **Smart Contract Versioning**: Track up to 100 versions on-chain with queryable version history
+- **Ordinal Inscription Versioning**: Unlimited version history tracked via lightweight inscription metadata
 - **Decentralized & Extensible**: Open source architecture supports multiple indexer and content providers
 - **Framework Agnostic**: Works with Vite, Create React App, Next.js (static export), or any React build tool
 - **UTXO Chaining**: Efficiently chains UTXOs to avoid double-spend errors
@@ -96,6 +96,16 @@ The CLI will output the entry point URL:
 https://ordfs.network/<txid>_<vout>
 ```
 
+After your first deployment, a `.env` file is automatically created with your configuration. This means subsequent deployments only need the version information:
+
+```bash
+npx react-onchain deploy \
+  --version-tag "1.1.0" \
+  --version-description "Bug fixes and improvements"
+```
+
+All other configuration (payment key, destination address, build directory, versioning contract) is automatically loaded from `.env` and `deployment-manifest.json`.
+
 ## CLI Usage
 
 ```bash
@@ -103,13 +113,13 @@ https://ordfs.network/<txid>_<vout>
 npx react-onchain deploy [options]
 
 # Query version history (on-chain)
-npx react-onchain version:history <contract>
+npx react-onchain version:history <inscription>
 
 # Get version details (on-chain)
-npx react-onchain version:info <contract> <version>
+npx react-onchain version:info <inscription> <version>
 
-# Get contract info (on-chain)
-npx react-onchain contract:info <contract>
+# Get inscription info (on-chain)
+npx react-onchain version:summary <inscription>
 
 # View deployment history (local)
 npx react-onchain manifest:history
@@ -117,17 +127,19 @@ npx react-onchain manifest:history
 
 ### Deploy Options
 
-| Option                             | Alias | Description                                  | Default  |
-| ---------------------------------- | ----- | -------------------------------------------- | -------- |
-| `--build-dir <directory>`          | `-b`  | Build directory to deploy                    | `./dist` |
-| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format            | Required |
-| `--destination <ordAddress>`       | `-d`  | Destination ord address for inscriptions     | Required |
-| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                     | `1`      |
-| `--dry-run`                        |       | Test deployment without broadcasting         | `false`  |
-| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")           | Optional |
-| `--version-description <string>`   |       | Changelog or release notes                   | Optional |
-| `--versioning-contract <outpoint>` |       | Existing versioning contract                 | Optional |
-| `--app-name <string>`              |       | Application name for new versioning contract | Optional |
+| Option                             | Alias | Description                                     | Default  |
+| ---------------------------------- | ----- | ----------------------------------------------- | -------- |
+| `--build-dir <directory>`          | `-b`  | Build directory to deploy                       | `./dist` |
+| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format               | Required |
+| `--destination <ordAddress>`       | `-d`  | Destination ord address for inscriptions        | Required |
+| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                        | `1`      |
+| `--dry-run`                        |       | Test deployment without broadcasting            | `false`  |
+| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")              | Optional |
+| `--version-description <string>`   |       | Changelog or release notes                      | Optional |
+| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin          | Optional |
+| `--app-name <string>`              |       | Application name for new versioning inscription | Optional |
+
+**Note:** After your first deployment, a `.env` file is auto-created with your configuration. Most options can then be omitted from the CLI and will be loaded automatically from `.env` and `deployment-manifest.json`.
 
 ### Examples
 
@@ -182,6 +194,7 @@ TOTAL                                   162.13 KB      4 files
 Entry point: https://ordfs.network/abc123def456_0
 
 Manifest saved to: deployment-manifest.json
+Configuration saved to: .env
 ```
 
 ## Custom Domains
@@ -212,18 +225,18 @@ This ensures users always get redirected to the most recent deployment while mai
 
 ## On-Chain Versioning
 
-Deploy your React app with on-chain version tracking. Users can access specific versions via URL parameters, enabling safe rollbacks and version pinning.
+Deploy your React app with on-chain version tracking using lightweight inscription metadata. Users can access specific versions via URL parameters, enabling safe rollbacks and version pinning.
 
 ### How It Works
 
-1. **First Deployment**: Creates a versioning smart contract on-chain
-2. **Subsequent Deployments**: Version redirect script is injected, enabling `?version=X` URL parameters
-3. **Version History**: Smart contract tracks up to 100 versions with metadata (all deployments remain permanently on-chain)
-4. **Version Access**: Users can query version history via CLI or access specific versions via URL
+1. **First Deployment**: Creates a versioning inscription with metadata containing version-to-outpoint mappings
+2. **Subsequent Deployments**: Spends the previous inscription and merges metadata, creating an unlimited version history chain
+3. **Version Redirect**: Injected script queries inscription metadata via `ordfs.network` to resolve version queries
+4. **Built-in Latest**: Use `?seq=-1` to always access the latest version via ordfs.network's origin chain resolution
 
 ### First Deployment
 
-Deploy your first version and create a versioning contract:
+Deploy your first version and create a versioning inscription:
 
 ```bash
 npx react-onchain deploy \
@@ -235,56 +248,62 @@ npx react-onchain deploy \
   --app-name "MyDApp"
 ```
 
-**Note:** Save the `versioningContract` outpoint from the deployment output for future deployments.
+After deployment, a `.env` file is automatically created containing all your configuration (payment key, destination address, build directory, and versioning contract). This file is in `.gitignore` to protect your private keys.
 
 ### Subsequent Deployments
 
-Deploy new versions using the existing contract:
+After your first deployment, you only need to specify the new version information:
 
 ```bash
 npx react-onchain deploy \
-  --build-dir ./dist \
-  --payment-key <WIF> \
-  --destination <ORD_ADDRESS> \
   --version-tag "1.1.0" \
-  --version-description "Added dark mode and bug fixes" \
-  --versioning-contract <CONTRACT_OUTPOINT>
+  --version-description "Added dark mode and bug fixes"
 ```
+
+All other configuration is automatically loaded from `.env` and `deployment-manifest.json`.
 
 Version redirect script is automatically injected starting with the second deployment, enabling `?version=` URL parameters.
 
 ### Accessing Versions
 
 - **Direct**: `<ENTRY_POINT_URL>` - loads current deployment
-- **Latest**: `<ENTRY_POINT_URL>?version=latest`
-- **Specific**: `<ENTRY_POINT_URL>?version=1.0.0`
+- **Latest via inscription**: `https://ordfs.network/content/<ORIGIN>?seq=-1` - always serves latest
+- **Latest via redirect**: `<ENTRY_POINT_URL>?version=latest` - redirects to latest
+- **Specific version**: `<ENTRY_POINT_URL>?version=1.0.0` - redirects to specific version
 
-**Note:** The contract stores up to 100 versions in queryable history. All deployments remain permanently on-chain regardless of this limit—only the version tracking metadata in the contract is limited.
+**Note:** Unlike the previous smart contract approach, inscription-based versioning has **unlimited** version history. All version metadata is stored in the inscription chain and automatically merges when spending.
 
 ### Custom Domains
 
-Point your domain to your deployment's entry point URL using a 301 redirect or CNAME. The entry point URL never changes—version redirects are handled by the injected script.
+Point your domain to always serve the latest version:
+
+```
+# DNS/CDN redirect to always get latest
+https://ordfs.network/content/<ORIGIN>?seq=-1
+```
+
+Or point to the entry point and let users control versions via `?version=` parameter.
 
 ### Versioning CLI Options
 
-| Option                             | Description                                |
-| ---------------------------------- | ------------------------------------------ |
-| `--version-tag <string>`           | Version identifier (e.g., "1.0.0")         |
-| `--version-description <string>`   | Changelog or release notes                 |
-| `--versioning-contract <outpoint>` | Existing contract (for subsequent deploys) |
-| `--app-name <string>`              | Application name (for first deployment)    |
+| Option                             | Description                                      |
+| ---------------------------------- | ------------------------------------------------ |
+| `--version-tag <string>`           | Version identifier (e.g., "1.0.0")               |
+| `--version-description <string>`   | Changelog or release notes                       |
+| `--versioning-contract <outpoint>` | Existing inscription origin (subsequent deploys) |
+| `--app-name <string>`              | Application name (for first deployment)          |
 
 ### Querying Version Information
 
 ```bash
 # View all versions
-npx react-onchain version:history <CONTRACT_OUTPOINT>
+npx react-onchain version:history <INSCRIPTION_ORIGIN>
 
 # Get specific version details
-npx react-onchain version:info <CONTRACT_OUTPOINT> <VERSION>
+npx react-onchain version:info <INSCRIPTION_ORIGIN> <VERSION>
 
-# Get contract information
-npx react-onchain contract:info <CONTRACT_OUTPOINT>
+# Get inscription information
+npx react-onchain version:summary <INSCRIPTION_ORIGIN>
 ```
 
 ## Deployment Manifest
@@ -327,7 +346,7 @@ The history includes:
 - Timestamp for each deployment
 - File counts and sizes
 - Total costs across all deployments
-- Shared versioning contract (if enabled)
+- Shared versioning inscription origin (if enabled)
 
 **Benefits:**
 
@@ -336,7 +355,7 @@ The history includes:
 - Easy reference to previous deployment details
 - Automatic migration from old single-deployment format
 
-**Note:** The manifest stores complete deployment history locally. This complements the on-chain contract which stores up to 100 versions of metadata. All actual deployments remain permanently on-chain regardless of either limit.
+**Note:** The manifest stores complete deployment history locally. This complements the on-chain inscription metadata which has unlimited version history. All deployments remain permanently on-chain.
 
 ## API Usage
 
@@ -404,8 +423,6 @@ Typical costs at 1 sat/KB:
 ```
 react-onchain/
 ├── src/
-│   ├── contracts/
-│   │   └── reactOnchainVersioning.ts     # Versioning smart contract (sCrypt)
 │   ├── services/
 │   │   ├── gorilla-pool/                 # GorillaPool indexer implementation
 │   │   │   ├── indexer.ts
@@ -419,15 +436,14 @@ react-onchain/
 │   ├── config.ts                         # Configuration management
 │   ├── inscriber.ts                      # Blockchain inscription handler
 │   ├── orchestrator.ts                   # Deployment orchestration
-│   ├── ordiProvider.ts                   # Custom ordinals provider
+│   ├── OrdiProvider.ts                   # Custom ordinals provider
 │   ├── rewriter.ts                       # Reference rewriting (HTML/CSS/JS)
 │   ├── retryUtils.ts                     # Retry logic with backoff
 │   ├── types.ts                          # TypeScript type definitions
-│   ├── versioningContractHandler.ts      # Smart contract interactions
+│   ├── versioningInscriptionHandler.ts   # Inscription-based versioning
 │   ├── versionRedirect.template.js       # Client-side version redirect script
 │   ├── serviceResolver.template.js       # Client-side service failover
 │   └── index.ts                          # Public API exports
-├── artifacts/contracts/                  # Compiled contract artifacts
 ├── tests/                                # Test suite
 ├── dist/                                 # Compiled JavaScript
 └── package.json

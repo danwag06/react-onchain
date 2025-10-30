@@ -1,9 +1,0 @@
-{
-  "success": true,
-  "errors": [],
-  "scryptfile": "contracts/reactOnchainVersioning.scrypt",
-  "sourceMapFile": "contracts/reactOnchainVersioning.scrypt.map",
-  "ctxMethods": [
-    "addVersion"
-  ]
-}
