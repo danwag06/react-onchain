@@ -130,16 +130,16 @@ npx react-onchain manifest:history
 
 ### Deploy Options
 
-| Option                             | Alias | Description                                           | Default  |
-| ---------------------------------- | ----- | ----------------------------------------------------- | -------- |
-| `--build-dir <directory>`          | `-b`  | Build directory to deploy                             | `./dist` |
+| Option                             | Alias | Description                                                  | Default  |
+| ---------------------------------- | ----- | ------------------------------------------------------------ | -------- |
+| `--build-dir <directory>`          | `-b`  | Build directory to deploy                                    | `./dist` |
 | `--payment-key <wif>`              | `-p`  | Payment private key in WIF format (destination auto-derived) | Required |
-| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                              | `1`      |
-| `--dry-run`                        |       | Test deployment without broadcasting                  | `false`  |
-| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")                    | Optional |
-| `--version-description <string>`   |       | Changelog or release notes                            | Optional |
-| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin                | Optional |
-| `--app-name <string>`              |       | Application name for new versioning inscription       | Optional |
+| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                                     | `1`      |
+| `--dry-run`                        |       | Test deployment without broadcasting                         | `false`  |
+| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")                           | Optional |
+| `--version-description <string>`   |       | Changelog or release notes                                   | Optional |
+| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin                       | Optional |
+| `--app-name <string>`              |       | Application name for new versioning inscription              | Optional |
 
 **Note:** After your first deployment, a `.env` file is auto-created with your configuration. Most options can then be omitted from the CLI and will be loaded automatically from `.env` and `deployment-manifest.json`.
 

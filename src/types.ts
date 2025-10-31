@@ -122,6 +122,8 @@ export interface DeploymentManifest {
   totalCost: number;
   totalSize: number;
   transactions: string[];
+  /** Origin outpoint of the versioning inscription chain (never changes, if versioning enabled) */
+  originVersioningInscription?: string;
   /** Latest versioning inscription outpoint after this deployment (if updated) */
   latestVersioningInscription?: string;
   /** Version deployed (if versioning enabled) */
@@ -144,8 +146,8 @@ export interface DeploymentManifestHistory {
   manifestVersion: string;
   /** Optional project name/identifier */
   projectName?: string;
-  /** Origin outpoint of the versioning inscription chain (if versioning enabled) */
-  versioningInscription?: string;
+  /** Origin outpoint of the versioning inscription chain (never changes, if versioning enabled) */
+  originVersioningInscription?: string;
   /** Total number of deployments */
   totalDeployments: number;
   /** Array of all deployments (chronological order) */

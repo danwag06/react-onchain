@@ -519,6 +519,7 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     totalCost: result.totalCost,
     totalSize: result.totalSize,
     transactions: result.txids,
+    originVersioningInscription: result.versioningContract,
     latestVersioningInscription: result.latestVersioningInscription,
     version: result.version,
     versionDescription: result.versionDescription,
@@ -564,10 +565,10 @@ export async function saveManifestWithHistory(
         history.deployments.push(manifest);
         history.totalDeployments = history.deployments.length;
 
-        // Keep existing versioningInscription (origin) - it never changes
+        // Keep existing originVersioningInscription (origin) - it never changes
         // Only set it if not already set and this deployment has one
-        if (!history.versioningInscription && manifest.latestVersioningInscription) {
-          history.versioningInscription = manifest.latestVersioningInscription;
+        if (!history.originVersioningInscription && manifest.originVersioningInscription) {
+          history.originVersioningInscription = manifest.originVersioningInscription;
         }
       } else if ('timestamp' in parsed && 'entryPoint' in parsed) {
         // Old format - migrate to new format
@@ -581,7 +582,7 @@ export async function saveManifestWithHistory(
 
         history = {
           manifestVersion: '1.0.0',
-          versioningInscription: manifest.latestVersioningInscription,
+          originVersioningInscription: manifest.originVersioningInscription,
           totalDeployments: 2, // Old deployment + new deployment
           deployments: [migratedOldManifest, manifest],
         };
@@ -613,7 +614,7 @@ export async function saveManifestWithHistory(
 function createNewHistory(manifest: DeploymentManifest): DeploymentManifestHistory {
   return {
     manifestVersion: '1.0.0',
-    versioningInscription: manifest.latestVersioningInscription,
+    originVersioningInscription: manifest.originVersioningInscription,
     totalDeployments: 1,
     deployments: [manifest],
   };

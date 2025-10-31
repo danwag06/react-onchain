@@ -108,7 +108,7 @@ async function saveDeploymentEnv(config: {
     const lines = gitignoreContent.split('\n');
 
     // Check if .env is already in .gitignore
-    const hasEnv = lines.some(line => line.trim() === '.env');
+    const hasEnv = lines.some((line) => line.trim() === '.env');
 
     if (!hasEnv) {
       // Add .env to .gitignore
@@ -212,20 +212,20 @@ program
           const manifestData = JSON.parse(manifestJson);
 
           if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-            // New format - use top-level versioningInscription, last deployment for other config
+            // New format - use top-level originVersioningInscription, last deployment for other config
             const history = manifestData;
             if (history.deployments.length > 0) {
               const lastDeployment = history.deployments[history.deployments.length - 1];
 
               // Origin versioning inscription from top-level field
-              previousConfig.versioningContract = history.versioningInscription;
+              previousConfig.versioningContract = history.originVersioningInscription;
               // Build dir from last deployment
               previousConfig.buildDir = lastDeployment.buildDir;
             }
           } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
             // Old format - single deployment
             previousConfig.versioningContract =
-              manifestData.versioningInscription || manifestData.versioningContract;
+              manifestData.originVersioningInscription || manifestData.versioningContract;
             previousConfig.buildDir = manifestData.buildDir;
           }
         } catch (error) {
@@ -793,8 +793,8 @@ program
       console.log(chalk.gray(`Total cost: ~${totalCost} satoshis`));
       console.log(chalk.gray(`Total size: ${formatBytes(totalSize)}`));
 
-      if (history.versioningInscription) {
-        console.log(chalk.gray(`Versioning inscription: ${history.versioningInscription}`));
+      if (history.originVersioningInscription) {
+        console.log(chalk.gray(`Versioning inscription: ${history.originVersioningInscription}`));
       }
       console.log();
     } catch (error) {
