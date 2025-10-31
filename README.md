@@ -22,6 +22,7 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 - **Built-in Versioning**: Every deployment is versioned with unlimited history tracked on-chain
 - **Decentralized & Extensible**: Open source architecture supports multiple indexer and content providers
 - **Framework Agnostic**: Works with Vite, Create React App, Next.js (static export), or any React build tool
+- **React Router Support**: One-line setup for client-side routing (see below)
 - **UTXO Chaining**: Efficiently chains UTXOs to avoid double-spend errors
 - **Dry Run Mode**: Test deployments without spending satoshis
 - **Smart Caching**: Reuses unchanged files from previous deployments to minimize costs
@@ -66,7 +67,29 @@ npm install -g .
 
 ## Quick Start
 
-### 1. Build your React app
+### 1. React Router Setup (if using React Router)
+
+If your app uses React Router for client-side routing, add this **one line** to your Router component:
+
+```tsx
+import { BrowserRouter as Router } from 'react-router-dom';
+
+function App() {
+  return (
+    <Router basename={(window as any).__REACT_ONCHAIN_BASE__ || '/'}>{/* Your routes */}</Router>
+  );
+}
+```
+
+**That's it!** This single line makes your React Router app work on ordfs deployments AND locally with zero configuration.
+
+- On ordfs: `window.__REACT_ONCHAIN_BASE__` = `/content/{txid}_{vout}`
+- Locally: Falls back to `'/'`
+- On custom domains: Automatically uses `'/'`
+
+**Why is this needed?** React Router needs to know the base path when your app is deployed to a subpath (like `/content/{txid}_{vout}`). This one-liner automatically detects and configures it.
+
+### 2. Build your React app
 
 ```bash
 # For Vite
@@ -79,7 +102,7 @@ npm run build
 npm run build && npm run export
 ```
 
-### 2. Deploy to blockchain
+### 3. Deploy to blockchain
 
 > **⚠️ Use an Ordinals-Compatible Wallet**
 >
@@ -99,7 +122,7 @@ The interactive prompts will ask you for:
 
 The destination address is automatically derived from your payment key.
 
-### 3. Visit your app
+### 4. Visit your app
 
 The CLI will output the entry point URL:
 
