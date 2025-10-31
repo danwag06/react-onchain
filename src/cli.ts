@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
+import { input, password, confirm, select } from '@inquirer/prompts';
 import { deployToChain, generateManifest, saveManifestWithHistory } from './orchestrator.js';
 import { getVersionDetails, getVersionInfoAndHistory } from './versioningInscriptionHandler.js';
 import { config as envConfig, DEFAULT_CONFIG } from './config.js';
@@ -60,22 +61,68 @@ async function loadContentUrl(manifestPath: string = 'deployment-manifest.json')
  * Display file size summary table
  */
 function displaySummary(inscriptions: InscribedFile[], totalSize: number): void {
-  console.log(chalk.bold.white('📄 Inscribed Files'));
-  console.log(chalk.gray('─'.repeat(70)));
+  // Separate cached and new files
+  const newFiles = inscriptions.filter((f) => !f.cached);
+  const cachedFiles = inscriptions.filter((f) => f.cached);
 
-  // File rows
-  inscriptions.forEach((file, index) => {
-    const fileName =
-      file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
+  // Display new inscriptions
+  if (newFiles.length > 0) {
+    console.log(chalk.bold.white('📄 New Inscriptions'));
+    console.log(chalk.gray('─'.repeat(70)));
 
-    const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
-    const name = chalk.white(fileName.padEnd(35));
-    const size = chalk.yellow(formatBytes(file.size).padEnd(10));
-    const txid = chalk.gray(file.txid.slice(0, 8) + '...');
+    newFiles.forEach((file, index) => {
+      const fileName =
+        file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
 
-    console.log(`  ${number}${name} ${size} ${txid}`);
-  });
+      const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
+      const name = chalk.white(fileName.padEnd(35));
+      const size = chalk.yellow(formatBytes(file.size).padEnd(10));
+      const txid = chalk.gray(file.txid.slice(0, 8) + '...');
 
+      console.log(`  ${number}${name} ${size} ${txid}`);
+    });
+
+    const newFilesSize = newFiles.reduce((sum, f) => sum + f.size, 0);
+    console.log(chalk.gray('─'.repeat(70)));
+    console.log(
+      chalk.gray('  SUBTOTAL'.padEnd(39)) +
+        chalk.bold.green(formatBytes(newFilesSize).padEnd(11)) +
+        chalk.gray(`${newFiles.length} file${newFiles.length !== 1 ? 's' : ''}`)
+    );
+    console.log(chalk.gray('─'.repeat(70)));
+    console.log();
+  }
+
+  // Display cached files
+  if (cachedFiles.length > 0) {
+    console.log(chalk.bold.cyan('📦 Cached Files (Reused)'));
+    console.log(chalk.gray('─'.repeat(70)));
+
+    cachedFiles.forEach((file, index) => {
+      const fileName =
+        file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
+
+      const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
+      const name = chalk.cyan(fileName.padEnd(35));
+      const size = chalk.gray(formatBytes(file.size).padEnd(10));
+      const txid = chalk.gray(file.txid.slice(0, 8) + '...');
+
+      console.log(`  ${number}${name} ${size} ${txid}`);
+    });
+
+    const cachedFilesSize = cachedFiles.reduce((sum, f) => sum + f.size, 0);
+    console.log(chalk.gray('─'.repeat(70)));
+    console.log(
+      chalk.gray('  SUBTOTAL'.padEnd(39)) +
+        chalk.cyan(formatBytes(cachedFilesSize).padEnd(11)) +
+        chalk.gray(`${cachedFiles.length} file${cachedFiles.length !== 1 ? 's' : ''}`)
+    );
+    console.log(chalk.gray('─'.repeat(70)));
+    console.log();
+  }
+
+  // Display total
+  console.log(chalk.bold.white('📊 Total'));
   console.log(chalk.gray('─'.repeat(70)));
   console.log(
     chalk.gray('  TOTAL'.padEnd(39)) +
@@ -87,13 +134,214 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
 }
 
 /**
+ * Detect available build directories and prompt user to select one
+ */
+async function promptForBuildDir(previousBuildDir?: string): Promise<string> {
+  const commonBuildDirs = ['dist', 'build', 'out', '.next/standalone', 'public'];
+  const detectedDirs: string[] = [];
+
+  // Check each common directory
+  for (const dir of commonBuildDirs) {
+    const fullPath = resolve(dir);
+    if (existsSync(fullPath) && existsSync(resolve(fullPath, 'index.html'))) {
+      detectedDirs.push(dir);
+    }
+  }
+
+  // If previous build dir exists and is valid, offer it first
+  if (previousBuildDir && existsSync(previousBuildDir)) {
+    const useExisting = await confirm({
+      message: `Use build directory from previous deployment? ${chalk.cyan(previousBuildDir)}`,
+      default: true,
+    });
+
+    if (useExisting) {
+      return previousBuildDir;
+    }
+  }
+
+  // If we found directories, let user select or enter custom
+  if (detectedDirs.length > 0) {
+    const choices = [
+      ...detectedDirs.map((dir) => ({ name: `${dir}  ${chalk.gray('(detected)')}`, value: dir })),
+      { name: 'Enter custom path', value: 'custom' },
+    ];
+
+    const selected = await select({
+      message: 'Select build directory:',
+      choices,
+    });
+
+    if (selected !== 'custom') {
+      return selected;
+    }
+  }
+
+  // Prompt for custom path
+  const customPath = await input({
+    message: 'Enter build directory path:',
+    validate: (value: string) => {
+      const fullPath = resolve(value);
+      if (!existsSync(fullPath)) {
+        return `Directory not found: ${fullPath}`;
+      }
+      if (!existsSync(resolve(fullPath, 'index.html'))) {
+        return 'index.html not found in directory';
+      }
+      return true;
+    },
+  });
+
+  return customPath;
+}
+
+/**
+ * Validate version doesn't already exist in manifest
+ */
+function checkVersionInManifest(
+  version: string,
+  manifestPath: string = 'deployment-manifest.json'
+): { exists: boolean; availableVersions: string[]; suggestion: string } {
+  const availableVersions: string[] = [];
+
+  const resolvedPath = resolve(manifestPath);
+  if (existsSync(resolvedPath)) {
+    try {
+      const manifestJson = readFileSync(resolvedPath, 'utf-8');
+      const manifestData = JSON.parse(manifestJson);
+
+      let deployments = [];
+      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+        deployments = manifestData.deployments;
+      } else if ('version' in manifestData) {
+        deployments = [manifestData];
+      }
+
+      // Collect all versions
+      for (const deployment of deployments) {
+        if (deployment.version) {
+          availableVersions.push(deployment.version);
+        }
+      }
+
+      // Check if version exists
+      const exists = availableVersions.includes(version);
+
+      // Generate suggestion
+      let suggestion = version;
+      if (exists) {
+        const parts = version.split('.');
+        const lastPart = parseInt(parts[parts.length - 1] || '0');
+        parts[parts.length - 1] = String(lastPart + 1);
+        suggestion = parts.join('.');
+      }
+
+      return { exists, availableVersions, suggestion };
+    } catch (error) {
+      // Error reading manifest, assume version doesn't exist
+      console.error(
+        chalk.yellow('⚠️  Warning: Could not read manifest for version validation:'),
+        error
+      );
+    }
+  }
+
+  return { exists: false, availableVersions: [], suggestion: version };
+}
+
+/**
+ * Get the last version from manifest and increment patch version
+ */
+function getLastVersionAndSuggestNext(manifestPath: string): string | undefined {
+  const resolvedPath = resolve(manifestPath);
+  if (!existsSync(resolvedPath)) {
+    return undefined;
+  }
+
+  try {
+    const manifestJson = readFileSync(resolvedPath, 'utf-8');
+    const manifestData = JSON.parse(manifestJson);
+
+    let lastVersion: string | undefined;
+
+    if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+      // New format - get last deployment version
+      const deployments = manifestData.deployments;
+      if (deployments.length > 0) {
+        lastVersion = deployments[deployments.length - 1].version;
+      }
+    } else if ('version' in manifestData) {
+      // Old format - single deployment
+      lastVersion = manifestData.version;
+    }
+
+    if (lastVersion) {
+      // Increment patch version (e.g., "1.0.0" → "1.0.1")
+      const parts = lastVersion.split('.');
+      if (parts.length === 3) {
+        parts[2] = String(parseInt(parts[2]) + 1);
+        return parts.join('.');
+      }
+    }
+  } catch (error) {
+    // Ignore errors, return undefined
+  }
+
+  return undefined;
+}
+
+/**
+ * Prompt for version tag with validation
+ */
+async function promptForVersion(
+  isFirstDeployment: boolean,
+  manifestPath: string = 'deployment-manifest.json'
+): Promise<string> {
+  let version: string;
+
+  // Get suggested version
+  const suggestedVersion = isFirstDeployment
+    ? '1.0.0'
+    : getLastVersionAndSuggestNext(manifestPath) || '1.0.0';
+
+  while (true) {
+    version = await input({
+      message: 'Version tag:',
+      default: suggestedVersion,
+      validate: (value: string) => {
+        if (!value || value.trim() === '') {
+          return 'Version is required';
+        }
+        return true;
+      },
+    });
+
+    const check = checkVersionInManifest(version.trim(), manifestPath);
+
+    if (check.exists) {
+      console.log(chalk.red(`\n✗ Version ${version} already exists`));
+      if (check.availableVersions.length > 0) {
+        console.log(chalk.gray(`  Existing versions: ${check.availableVersions.join(', ')}`));
+      }
+      console.log(chalk.gray(`  Suggestion: ${check.suggestion}\n`));
+      continue;
+    }
+
+    break;
+  }
+
+  return version.trim();
+}
+
+/**
  * Save deployment configuration to .env file
  * Allows subsequent deployments to use stored config
  */
 async function saveDeploymentEnv(config: {
   paymentKey: string;
   buildDir: string;
-  versioningContract?: string;
+  appName: string;
+  versioningOriginInscription: string;
   ordinalContentUrl: string;
   satsPerKb: number;
 }): Promise<void> {
@@ -125,37 +373,40 @@ async function saveDeploymentEnv(config: {
   const envContent = `# React OnChain Deployment Configuration
 # Auto-generated by react-onchain on ${timestamp}
 #
-# This file contains your deployment settings for convenience.
-# Subsequent deployments can use these values automatically.
-#
 # ⚠️  SECURITY WARNING ⚠️
 # This file contains your PRIVATE KEY!
 # - NEVER commit this file to version control
 # - NEVER share this file with anyone
-# - Keep this file secure and private
 #
-# The .env file is already in .gitignore to help protect your keys.
+# The .env file is in .gitignore to protect your keys.
 
 # Payment private key (WIF format)
-# Used to sign transactions during deployment
 # Destination address is automatically derived from this key
 REACT_ONCHAIN_PAYMENT_KEY=${config.paymentKey}
 
-# Build directory to deploy
+# Build directory
 BUILD_DIR=${config.buildDir}
 
-# Versioning contract outpoint (from first deployment)
-${config.versioningContract ? `VERSIONING_CONTRACT=${config.versioningContract}` : '# VERSIONING_CONTRACT=<will be set after first deployment>'}
+# Application name
+APP_NAME=${config.appName}
 
-# Ordinal content delivery URL (base URL without /content path)
-# Relative inscription URLs (/content/{outpoint}) are appended to this
+# Versioning origin inscription (permanent reference)
+VERSIONING_ORIGIN_INSCRIPTION=${config.versioningOriginInscription}
+
+# Content delivery service
 ORDINAL_CONTENT_URL=${config.ordinalContentUrl}
 
 # Transaction fee rate (satoshis per KB)
 SATS_PER_KB=${config.satsPerKb}
 
-# For subsequent deployments, you can now just run:
-# npx react-onchain deploy --version-tag "1.1.0" --version-description "Bug fixes"
+# ==============================================================
+# For subsequent deployments, simply run:
+#   npx react-onchain deploy
+#
+# The CLI will auto-load all config and prompt only for:
+#   - New version tag (with smart increment suggestion)
+#   - Version description
+# ==============================================================
 `;
 
   await writeFile(envPath, envContent, 'utf-8');
@@ -192,18 +443,26 @@ program
     envConfig.versionDescription
   )
   .option(
-    '--versioning-contract <outpoint>',
-    'Existing versioning contract outpoint (txid_vout)',
-    envConfig.versioningContract
+    '--versioning-origin-description <description>',
+    'Existing versioning origin description',
+    envConfig.versioningOriginDescription
   )
-  .option('--app-name <string>', 'Application name for new versioning contract', envConfig.appName)
+  .option(
+    '--app-name <string>',
+    'Application name for new versioning origin inscription',
+    envConfig.appName
+  )
   .action(async (options) => {
     try {
+      // Step 0: Capture which flags were explicitly provided via CLI (before interactive prompts)
+      const wasPaymentKeyProvided = options.paymentKey !== undefined;
+      const wasVersionTagProvided = options.versionTag !== undefined;
+
       // Step 1: Load previous manifest to get stored configuration
       const manifestPath = resolve('deployment-manifest.json');
       let previousConfig: {
         buildDir?: string;
-        versioningContract?: string;
+        versioningOriginInscription?: string;
       } = {};
 
       if (existsSync(manifestPath)) {
@@ -218,14 +477,14 @@ program
               const lastDeployment = history.deployments[history.deployments.length - 1];
 
               // Origin versioning inscription from top-level field
-              previousConfig.versioningContract = history.originVersioningInscription;
+              previousConfig.versioningOriginInscription = history.originVersioningInscription;
               // Build dir from last deployment
               previousConfig.buildDir = lastDeployment.buildDir;
             }
           } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
             // Old format - single deployment
-            previousConfig.versioningContract =
-              manifestData.originVersioningInscription || manifestData.versioningContract;
+            previousConfig.versioningOriginInscription =
+              manifestData.originVersioningInscription || '';
             previousConfig.buildDir = manifestData.buildDir;
           }
         } catch (error) {
@@ -233,55 +492,111 @@ program
         }
       }
 
-      // Step 2: Auto-detect build directory if not provided
-      // Check if buildDir was explicitly set (not default)
+      // Step 2: Build directory - interactive prompt or auto-detect
       const buildDirExplicitlySet = options.buildDir !== DEFAULT_CONFIG.buildDir;
+      const isSubsequentDeployment = !!previousConfig.versioningOriginInscription;
 
       if (!buildDirExplicitlySet) {
-        // Try previous manifest first
-        if (previousConfig.buildDir && existsSync(previousConfig.buildDir)) {
-          options.buildDir = previousConfig.buildDir;
-        } else {
-          // Auto-detect common build directories
-          const commonBuildDirs = ['dist', 'build', 'out', '.next/standalone', 'public'];
-          for (const dir of commonBuildDirs) {
-            const fullPath = resolve(dir);
-            if (existsSync(fullPath) && existsSync(resolve(fullPath, 'index.html'))) {
-              options.buildDir = dir;
-              break;
-            }
-          }
-
-          if (!options.buildDir) {
-            console.error(
-              chalk.red(
-                'Error: Could not auto-detect build directory. Please specify with --build-dir'
-              )
-            );
-            console.error(chalk.gray('  Tried: ' + commonBuildDirs.join(', ')));
-            process.exit(1);
-          }
+        // Interactive mode - prompt for build directory
+        try {
+          options.buildDir = await promptForBuildDir(previousConfig.buildDir);
+        } catch (error) {
+          console.error(chalk.red('\nBuild directory selection cancelled.'));
+          process.exit(1);
         }
       }
 
       // Step 3: Apply configuration precedence for other options
       // Order: CLI flag > Previous manifest > Environment variable > Default
 
-      // Versioning contract (use origin from first deployment)
-      if (!options.versioningContract && previousConfig.versioningContract) {
-        options.versioningContract = previousConfig.versioningContract;
+      // Versioning origin inscription (use origin from first deployment)
+      if (!options.versioningOriginInscription && previousConfig.versioningOriginInscription) {
+        options.versioningOriginInscription = previousConfig.versioningOriginInscription;
       }
 
-      // Validate required options (unless dry-run)
-      if (!options.dryRun) {
-        if (!options.paymentKey) {
-          console.error(chalk.red('Error: --payment-key is required (or use --dry-run)'));
+      // Step 4: Interactive prompts for missing values
+
+      // Payment key
+      if (!options.dryRun && !options.paymentKey) {
+        try {
+          options.paymentKey = await password({
+            message: 'Payment key (WIF format):',
+            mask: '•',
+            validate: (value: string) => {
+              if (!value || value.trim() === '') {
+                return 'Payment key is required';
+              }
+              // Basic WIF format validation (starts with K, L, or 5 for mainnet)
+              if (!/^[KL5]/.test(value.trim())) {
+                return 'Invalid WIF format (should start with K, L, or 5)';
+              }
+              return true;
+            },
+          });
+        } catch (error) {
+          console.error(chalk.red('\nPayment key input cancelled.'));
           process.exit(1);
         }
-      } else {
-        // In dry-run mode, use dummy values if not provided
-        if (!options.paymentKey) {
-          options.paymentKey = 'L1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4a5b6c7d8e9f0';
+      } else if (options.dryRun && !options.paymentKey) {
+        // In dry-run mode, use dummy value if not provided
+        options.paymentKey = 'L1aB2cD3eF4gH5iJ6kL7mN8oP9qR0sT1uV2wX3yZ4a5b6c7d8e9f0';
+      }
+
+      // App name (always required for first deployment)
+      if (!isSubsequentDeployment && !options.appName) {
+        if (options.dryRun) {
+          // Dry-run mode: use dummy value
+          options.appName = 'DryRunApp';
+        } else {
+          try {
+            options.appName = await input({
+              message: 'App name (for versioning):',
+              default: 'ReactApp',
+            });
+          } catch (error) {
+            console.error(chalk.red('\nApp name input cancelled.'));
+            process.exit(1);
+          }
+        }
+      } else if (isSubsequentDeployment && !options.appName) {
+        // Load app name from manifest for subsequent deployments
+        // This will be loaded automatically from manifest later, but set a default just in case
+        options.appName = 'ReactApp';
+      }
+
+      // Version tag (always required)
+      if (!options.versionTag) {
+        if (options.dryRun) {
+          // Dry-run mode: use dummy version
+          options.versionTag = '1.0.0-dryrun';
+        } else {
+          try {
+            options.versionTag = await promptForVersion(
+              !isSubsequentDeployment,
+              options.manifest || 'deployment-manifest.json'
+            );
+          } catch (error) {
+            console.error(chalk.red('\nVersion input cancelled.'));
+            process.exit(1);
+          }
+        }
+      }
+
+      // Version description (always required)
+      if (!options.versionDescription) {
+        if (options.dryRun) {
+          // Dry-run mode: use dummy description
+          options.versionDescription = 'Dry run deployment';
+        } else {
+          try {
+            options.versionDescription = await input({
+              message: 'Version description:',
+              default: isSubsequentDeployment ? undefined : 'Initial release',
+            });
+          } catch (error) {
+            console.error(chalk.red('\nVersion description input cancelled.'));
+            process.exit(1);
+          }
         }
       }
 
@@ -333,21 +648,20 @@ program
       console.log(chalk.gray('  Build directory: ') + chalk.cyan(buildDir));
       console.log(chalk.gray('  Fee rate:        ') + chalk.cyan(`${options.satsPerKb} sats/KB`));
 
-      // Display versioning info if enabled
-      if (options.versionTag) {
-        console.log(chalk.gray('  Version:         ') + chalk.magenta(options.versionTag));
-        if (options.versionDescription) {
-          console.log(chalk.gray('  Description:     ') + chalk.white(options.versionDescription));
-        }
-        if (options.versioningContract) {
-          console.log(chalk.gray('  Contract:        ') + chalk.yellow(options.versioningContract));
-        } else if (options.appName) {
-          console.log(
-            chalk.gray('  App name:        ') +
-              chalk.green(options.appName) +
-              chalk.gray(' (new versioning inscription)')
-          );
-        }
+      // Display versioning info (always shown)
+      console.log(chalk.gray('  Version:         ') + chalk.magenta(options.versionTag!));
+      console.log(chalk.gray('  Description:     ') + chalk.white(options.versionDescription!));
+      if (options.versioningOriginInscription) {
+        console.log(
+          chalk.gray('  Origin Inscription:        ') +
+            chalk.yellow(options.versioningOriginInscription)
+        );
+      } else {
+        console.log(
+          chalk.gray('  App name:        ') +
+            chalk.green(options.appName!) +
+            chalk.gray(' (new versioning inscription)')
+        );
       }
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
@@ -360,12 +674,38 @@ program
         dryRun: options.dryRun,
         ordinalContentUrl: options.ordinalContentUrl,
         ordinalIndexerUrl: options.ordinalIndexerUrl,
-        enableVersioning: !!options.versionTag,
-        version: options.versionTag,
-        versionDescription: options.versionDescription,
-        versioningContract: options.versioningContract,
-        appName: options.appName,
+        version: options.versionTag!,
+        versionDescription: options.versionDescription!,
+        versioningOriginInscription: options.versioningOriginInscription,
+        appName: options.appName!,
       };
+
+      // Confirmation prompt before deployment (skip if flags were explicitly provided via CLI)
+      // Note: We use the captured boolean flags from before interactive prompts ran
+      const hasProvidedFlags =
+        buildDirExplicitlySet || wasPaymentKeyProvided || wasVersionTagProvided;
+
+      if (!options.dryRun && !hasProvidedFlags) {
+        console.log(
+          chalk.yellow('⚠️  This will inscribe files to the blockchain and spend satoshis.')
+        );
+        try {
+          const proceed = await confirm({
+            message: 'Proceed with deployment?',
+            default: true,
+          });
+
+          if (!proceed) {
+            console.log(chalk.yellow('\n✋ Deployment cancelled by user.\n'));
+            process.exit(0);
+          }
+
+          console.log();
+        } catch (error) {
+          console.log(chalk.yellow('\n✋ Deployment cancelled.\n'));
+          process.exit(0);
+        }
+      }
 
       // Capture content URL for displaying absolute URLs in logs
       const contentUrlForDisplay = config.ordinalContentUrl || envConfig.ordinalContentUrl;
@@ -446,93 +786,104 @@ program
       displaySummary(result.inscriptions, result.totalSize);
 
       // Stats section
+      const newFileCount = result.inscriptions.filter((f) => !f.cached).length;
+      const cachedFileCount = result.inscriptions.filter((f) => f.cached).length;
+      const newFilesSize = result.inscriptions
+        .filter((f) => !f.cached)
+        .reduce((sum, f) => sum + f.size, 0);
+
       console.log(chalk.bold.white('📊 Deployment Stats'));
       console.log(chalk.gray('─'.repeat(70)));
-      console.log(chalk.gray('  Total files:      ') + chalk.white(result.inscriptions.length));
-      console.log(chalk.gray('  Total size:       ') + chalk.white(formatBytes(result.totalSize)));
       console.log(
-        chalk.gray('  Total cost:       ') + chalk.white(`~${result.totalCost} satoshis`)
+        chalk.gray('  New files:        ') +
+          chalk.white(newFileCount) +
+          chalk.gray(` (${formatBytes(newFilesSize)})`)
+      );
+      console.log(chalk.gray('  Cached files:     ') + chalk.cyan(cachedFileCount));
+      console.log(
+        chalk.gray('  Total files:      ') +
+          chalk.white(result.inscriptions.length) +
+          chalk.gray(` (${formatBytes(result.totalSize)})`)
+      );
+      console.log(
+        chalk.gray('  Inscription cost: ') + chalk.white(`~${result.totalCost} satoshis`)
       );
       console.log(chalk.gray('  Transactions:     ') + chalk.white(result.txids.length));
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
 
-      // Display versioning information if available
-      if (result.versioningContract) {
-        console.log(chalk.bold.magenta('📦 Versioning'));
-        console.log(chalk.gray('─'.repeat(70)));
-        console.log(chalk.gray('  Contract:         ') + chalk.yellow(result.versioningContract));
-        if (result.version) {
-          console.log(chalk.gray('  Version:          ') + chalk.magenta(result.version));
-        }
+      // Display versioning information (always shown)
+      console.log(chalk.bold.magenta('📦 Versioning'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(
+        chalk.gray('  Origin:         ') + chalk.yellow(result.versioningOriginInscription)
+      );
+      console.log(chalk.gray('  Version:          ') + chalk.magenta(result.version));
 
-        // Check if this is a first deployment (no --versioning-contract provided)
-        const isFirstDeployment = !options.versioningContract;
+      // Check if this is a first deployment (no --versioning-origin-inscription provided)
+      const isFirstDeployment = !options.versioningOriginInscription;
 
-        if (isFirstDeployment) {
-          // First deployment - no version redirect script injected
-          console.log(
-            chalk.gray('  Version redirect: ') +
-              chalk.yellow('Not available yet (first deployment)')
-          );
-          console.log(
-            chalk.gray('                    ') + chalk.gray('Will be enabled on next deployment')
-          );
-          console.log();
-          console.log(chalk.gray('  💡 To deploy next version:'));
-          console.log(chalk.cyan(`     npx react-onchain deploy \\`));
-          console.log(chalk.cyan(`       --version-tag "2.0.0" \\`));
-          console.log(chalk.cyan(`       --version-description "Added new features"`));
-          console.log();
-          console.log(chalk.gray('     (all config auto-loaded from .env and manifest)'));
-        } else {
-          // Subsequent deployment - version redirect script was injected
-          console.log(chalk.gray('  Version redirect: ') + chalk.green('✓ Enabled'));
-          console.log(
-            chalk.gray('  Version access:   ') +
-              chalk.cyan(`${result.ordinalContentUrl + result.entryPointUrl}?version=<VERSION>`)
-          );
-        }
-
-        console.log(chalk.gray('─'.repeat(70)));
+      if (isFirstDeployment) {
+        // First deployment - no version redirect script injected
+        console.log(
+          chalk.gray('  Version redirect: ') + chalk.yellow('Not available yet (first deployment)')
+        );
+        console.log(
+          chalk.gray('                    ') + chalk.gray('Will be enabled on next deployment')
+        );
         console.log();
-
-        // Show available query commands
-        console.log(chalk.bold.white('📋 Available Queries'));
-        console.log(chalk.gray('─'.repeat(70)));
-        console.log(
-          chalk.gray('Versioning Origin: ') + chalk.cyan(result.versioningContract || 'N/A')
-        );
-        console.log(chalk.gray('Current Version: ') + chalk.cyan(result.version || 'N/A'));
-        console.log(
-          chalk.gray('  • Version history:   ') +
-            chalk.cyan(`npx react-onchain version:history <ORIGIN>`)
-        );
-        console.log(
-          chalk.gray('  • Version summary:   ') +
-            chalk.cyan(`npx react-onchain version:summary <ORIGIN>`)
-        );
-        console.log(
-          chalk.gray('  • Version details:   ') +
-            chalk.cyan(`npx react-onchain version:info <ORIGIN> <VERSION>`)
-        );
-        console.log(chalk.gray('─'.repeat(70)));
+        console.log(chalk.gray('  💡 To deploy next version:'));
+        console.log(chalk.cyan(`     npx react-onchain deploy`));
         console.log();
+        console.log(chalk.gray('     (all config auto-loaded from .env and manifest)'));
+      } else {
+        // Subsequent deployment - version redirect script was injected
+        console.log(chalk.gray('  Version redirect: ') + chalk.green('✓ Enabled'));
+        console.log(
+          chalk.gray('  Version access:   ') +
+            chalk.cyan(`${result.ordinalContentUrl + result.entryPointUrl}?version=<VERSION>`)
+        );
       }
+
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log();
+
+      // Show available query commands
+      console.log(chalk.bold.white('📋 Available Queries'));
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log(
+        chalk.gray('  • Version history:   ') +
+          chalk.cyan(`npx react-onchain version:history <ORIGIN>`)
+      );
+      console.log(
+        chalk.gray('  • Version summary:   ') +
+          chalk.cyan(`npx react-onchain version:summary <ORIGIN>`)
+      );
+      console.log(
+        chalk.gray('  • Version details:   ') +
+          chalk.cyan(`npx react-onchain version:info <ORIGIN> <VERSION>`)
+      );
+      console.log(chalk.gray('─'.repeat(70)));
+      console.log();
 
       // Save manifest with history
       const manifest = generateManifest(result);
       const outputManifestPath = options.dryRun
         ? options.manifest.replace('.json', '-dry-run.json')
         : options.manifest;
-      const history = await saveManifestWithHistory(manifest, outputManifestPath);
+      const history = await saveManifestWithHistory(
+        manifest,
+        outputManifestPath,
+        result.versioningOriginInscription
+      );
 
       // Save deployment configuration to .env (only for real deployments)
       if (!options.dryRun) {
         await saveDeploymentEnv({
           paymentKey: options.paymentKey!,
           buildDir: buildDir,
-          versioningContract: result.versioningContract,
+          appName: options.appName!,
+          versioningOriginInscription: result.versioningOriginInscription,
           ordinalContentUrl: result.ordinalContentUrl || envConfig.ordinalContentUrl,
           satsPerKb: parseInt(options.satsPerKb || '1', 10),
         });
@@ -607,11 +958,33 @@ program
 
 // Version history command
 program
-  .command('version:history <inscription>')
-  .description('Show version history for a versioning inscription')
+  .command('version:history [inscription]')
+  .description(
+    'Show version history for a versioning inscription (auto-reads from manifest if not specified)'
+  )
   .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
   .action(async (inscriptionOrigin, options) => {
     try {
+      // If inscription not provided, try to read from manifest
+      if (!inscriptionOrigin) {
+        if (existsSync(options.manifest)) {
+          const manifestJson = await readFile(options.manifest, 'utf-8');
+          const manifestData = JSON.parse(manifestJson);
+
+          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+            inscriptionOrigin = manifestData.originVersioningInscription;
+          }
+        }
+
+        if (!inscriptionOrigin) {
+          console.error(chalk.red('\n❌ No versioning inscription found in manifest.'));
+          console.error(chalk.gray('   Please provide inscription origin as argument.\n'));
+          process.exit(1);
+        }
+
+        console.log(chalk.gray('✓ Using versioning inscription from manifest\n'));
+      }
+
       console.log(chalk.bold('\n📚 Version History\n'));
       console.log(chalk.gray(`Inscription: ${inscriptionOrigin}\n`));
 
@@ -652,11 +1025,33 @@ program
 
 // Version info command
 program
-  .command('version:info <inscription> <version>')
-  .description('Get detailed information about a specific version')
+  .command('version:info <version> [inscription]')
+  .description(
+    'Get detailed information about a specific version (auto-reads inscription from manifest if not specified)'
+  )
   .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
-  .action(async (inscriptionOrigin, version, options) => {
+  .action(async (version, inscriptionOrigin, options) => {
     try {
+      // If inscription not provided, try to read from manifest
+      if (!inscriptionOrigin) {
+        if (existsSync(options.manifest)) {
+          const manifestJson = await readFile(options.manifest, 'utf-8');
+          const manifestData = JSON.parse(manifestJson);
+
+          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+            inscriptionOrigin = manifestData.originVersioningInscription;
+          }
+        }
+
+        if (!inscriptionOrigin) {
+          console.error(chalk.red('\n❌ No versioning inscription found in manifest.'));
+          console.error(chalk.gray('   Please provide inscription origin as argument.\n'));
+          process.exit(1);
+        }
+
+        console.log(chalk.gray('✓ Using versioning inscription from manifest\n'));
+      }
+
       console.log(chalk.bold('\n📦 Version Details\n'));
 
       const spinner = ora(`Loading version ${version}...`).start();
@@ -689,11 +1084,33 @@ program
 
 // Inscription summary command
 program
-  .command('version:summary <inscription>')
-  .description('Get information about a versioning inscription')
+  .command('version:summary [inscription]')
+  .description(
+    'Get information about a versioning inscription (auto-reads from manifest if not specified)'
+  )
   .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
   .action(async (inscriptionOrigin, options) => {
     try {
+      // If inscription not provided, try to read from manifest
+      if (!inscriptionOrigin) {
+        if (existsSync(options.manifest)) {
+          const manifestJson = await readFile(options.manifest, 'utf-8');
+          const manifestData = JSON.parse(manifestJson);
+
+          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+            inscriptionOrigin = manifestData.originVersioningInscription;
+          }
+        }
+
+        if (!inscriptionOrigin) {
+          console.error(chalk.red('\n❌ No versioning inscription found in manifest.'));
+          console.error(chalk.gray('   Please provide inscription origin as argument.\n'));
+          process.exit(1);
+        }
+
+        console.log(chalk.gray('✓ Using versioning inscription from manifest\n'));
+      }
+
       console.log(chalk.bold('\n📋 Inscription Information\n'));
 
       const spinner = ora('Loading inscription info...').start();

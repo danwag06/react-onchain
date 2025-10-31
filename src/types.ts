@@ -34,6 +34,8 @@ export interface InscribedFile {
   contentHash?: string;
   /** Hash of dependency URLs (for cache invalidation when dependencies change) */
   dependencyHash?: string;
+  /** Whether this file was reused from cache (not newly inscribed) */
+  cached?: boolean;
 }
 
 /**
@@ -68,17 +70,15 @@ export interface DeploymentConfig {
   /** Ordinal indexer API URL for version queries */
   ordinalIndexerUrl?: string;
 
-  // Versioning options
-  /** Enable versioning for this deployment */
-  enableVersioning?: boolean;
-  /** Version string (e.g., "1.0.0") */
-  version?: string;
-  /** Version description/changelog */
-  versionDescription?: string;
-  /** Existing versioning inscription origin outpoint (txid_vout) */
-  versioningContract?: string;
-  /** App name for new versioning inscription */
-  appName?: string;
+  // Versioning options (always enabled)
+  /** Version string (e.g., "1.0.0") - required */
+  version: string;
+  /** Version description/changelog - required */
+  versionDescription: string;
+  /** Existing versioning inscription origin outpoint (txid_vout) - only exists after first deployment */
+  versioningOriginInscription?: string;
+  /** App name for versioning inscription - required */
+  appName: string;
 }
 
 /**
@@ -95,14 +95,14 @@ export interface DeploymentResult {
   txids: string[];
   /** Total size in bytes */
   totalSize: number;
-  /** Versioning inscription origin outpoint (if versioning enabled) */
-  versioningContract?: string;
-  /** Latest versioning inscription outpoint after this deployment (if updated) */
-  latestVersioningInscription?: string;
-  /** Version deployed (if versioning enabled) */
-  version?: string;
-  /** Version description/changelog (if versioning enabled) */
-  versionDescription?: string;
+  /** Versioning inscription origin outpoint */
+  versioningOriginInscription: string;
+  /** Latest versioning inscription outpoint after this deployment */
+  versioningLatestInscription?: string;
+  /** Version deployed */
+  version: string;
+  /** Version description/changelog */
+  versionDescription: string;
   /** Build directory used */
   buildDir?: string;
   /** Destination address used (derived from payment key) */
@@ -122,20 +122,24 @@ export interface DeploymentManifest {
   totalCost: number;
   totalSize: number;
   transactions: string[];
-  /** Origin outpoint of the versioning inscription chain (never changes, if versioning enabled) */
-  originVersioningInscription?: string;
-  /** Latest versioning inscription outpoint after this deployment (if updated) */
+  /** Latest versioning inscription outpoint after this deployment */
   latestVersioningInscription?: string;
-  /** Version deployed (if versioning enabled) */
-  version?: string;
-  /** Version description/changelog (if versioning enabled) */
-  versionDescription?: string;
+  /** Version deployed */
+  version: string;
+  /** Version description/changelog */
+  versionDescription: string;
   /** Build directory used for this deployment */
   buildDir?: string;
   /** Destination address used for inscriptions */
   destinationAddress?: string;
   /** Content service URL used for this deployment */
   ordinalContentUrl?: string;
+  /** Number of newly inscribed files */
+  newFiles: number;
+  /** Number of cached/reused files */
+  cachedFiles: number;
+  /** Number of new transactions created */
+  newTransactions: number;
 }
 
 /**

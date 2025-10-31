@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
 import { rewriteFile, injectVersionScript } from './rewriter.js';
-import { inscribeFile } from './inscriber.js';
+import { inscribeFile, estimateInscriptionCost } from './inscriber.js';
 import {
   deployVersioningInscription,
   updateVersioningInscription,
@@ -41,10 +41,9 @@ export async function deployToChain(
     paymentKey,
     satsPerKb,
     dryRun,
-    enableVersioning,
     version,
     versionDescription,
-    versioningContract,
+    versioningOriginInscription,
     appName,
     ordinalContentUrl,
     ordinalIndexerUrl,
@@ -82,13 +81,13 @@ export async function deployToChain(
   // On FIRST deployments: The script will use the entry point outpoint as the inscription origin.
   // On SUBSEQUENT deployments: The script will use the existing inscription origin from manifest.
   // The version redirect script gracefully handles cases where no inscription metadata exists yet.
-  let finalVersioningContract = versioningContract; // Note: field name kept for compatibility, but stores inscription origin
+  let finalVersioningOriginInscription = versioningOriginInscription; // Note: field name kept for compatibility, but stores inscription origin
   let changeUtxo: any = undefined; // Track change from previous transaction
 
-  // Step 1.6: Check manifest for duplicate version (LOCAL CHECK - always run if versioning enabled)
+  // Step 1.6: Check manifest for duplicate version (LOCAL CHECK - always run)
   // This prevents deploying the same version multiple times locally, which would waste satoshis on re-inscription
   const manifestPath = 'deployment-manifest.json';
-  if (enableVersioning && version && existsSync(manifestPath)) {
+  if (existsSync(manifestPath)) {
     try {
       const manifestJson = await readFile(manifestPath, 'utf-8');
       const manifestData = JSON.parse(manifestJson);
@@ -130,11 +129,11 @@ export async function deployToChain(
   // Step 1.7: Validate version doesn't exist in inscription metadata (ON-CHAIN CHECK - subsequent deployments only)
   // This prevents wasting satoshis on inscription when the version already exists in the metadata.
   // Skip this check for:
-  //   - First deployments (versioningContract/inscription origin is undefined)
+  //   - First deployments (versioning origin inscription is undefined)
   //   - Dry-run mode (don't hit the network)
-  if (versioningContract && enableVersioning && version && !dryRun && VERSIONING_ENABLED) {
+  if (versioningOriginInscription && !dryRun && VERSIONING_ENABLED) {
     try {
-      await checkVersionExists(versioningContract, version);
+      await checkVersionExists(versioningOriginInscription, version);
     } catch (error) {
       // Version exists or other error - fail fast before inscribing anything
       throw new Error(
@@ -185,20 +184,22 @@ export async function deployToChain(
   // Calculate total inscriptions for progress tracking
   let totalInscriptions = order.length;
   // Add empty versioning inscription for first deployment
-  if (enableVersioning && version && !versioningContract) {
+  if (!versioningOriginInscription) {
     totalInscriptions += 1;
   }
-  // Add metadata update inscription if versioning enabled
-  if (enableVersioning && version) {
-    totalInscriptions += 1;
-  }
+  // Add metadata update inscription (always added)
+  totalInscriptions += 1;
 
   let currentInscriptionIndex = 0;
 
   // Step 1.9: Deploy empty versioning inscription (FIRST DEPLOYMENT ONLY)
   // This happens BEFORE HTML inscription so we can inject the origin into the redirect script
   // The empty inscription becomes the origin, and we'll spend it after HTML deployment to add metadata
-  if (enableVersioning && version && !versioningContract && !dryRun && VERSIONING_ENABLED) {
+
+  // Initialize txids Set early to maintain chronological order
+  const txids = new Set<string>();
+
+  if (!versioningOriginInscription && !dryRun && VERSIONING_ENABLED) {
     currentInscriptionIndex++;
     callbacks?.onInscriptionStart?.(
       'versioning-origin',
@@ -206,27 +207,29 @@ export async function deployToChain(
       totalInscriptions
     );
     try {
-      finalVersioningContract = await deployVersioningInscription(
+      finalVersioningOriginInscription = await deployVersioningInscription(
         paymentPk,
         appName || 'ReactApp',
         destinationAddress,
         satsPerKb
       );
+      // Add versioning origin txid immediately (maintains chronological order)
+      const originTxid = finalVersioningOriginInscription.split('_')[0];
+      txids.add(originTxid);
+
       callbacks?.onInscriptionComplete?.(
         'versioning-origin',
-        `/content/${finalVersioningContract}`
+        `/content/${finalVersioningOriginInscription}`
       );
     } catch (error) {
-      console.warn(
-        '⚠️  Warning: Empty versioning inscription deployment failed. Continuing without versioning.'
+      throw new Error(
+        `Failed to deploy versioning inscription: ${error instanceof Error ? error.message : String(error)}`
       );
-      console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
-      finalVersioningContract = undefined;
     }
-  } else if (dryRun && enableVersioning && version && !versioningContract) {
+  } else if (dryRun && !versioningOriginInscription) {
     // DRY RUN MODE - Create mock versioning inscription origin
     const mockInscriptionTxid = 'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
-    finalVersioningContract = `${mockInscriptionTxid}_0`;
+    finalVersioningOriginInscription = `${mockInscriptionTxid}_0`;
   }
 
   // Step 2: Process files in topological order
@@ -234,8 +237,7 @@ export async function deployToChain(
   const urlMap = new Map<string, string>();
   let totalCost = 0;
   let totalSize = 0;
-  const txids = new Set<string>();
-  // changeUtxo is initialized above (either from contract deployment or undefined)
+  // changeUtxo is initialized above (either from inscription deployment or undefined)
 
   for (let i = 0; i < order.length; i++) {
     const filePath = order[i];
@@ -288,6 +290,7 @@ export async function deployToChain(
       inscriptions.push({
         ...previousInscription,
         // Keep original contentHash and dependencyHash
+        cached: true,
       });
       urlMap.set(filePath, previousInscription.urlPath);
       txids.add(previousInscription.txid);
@@ -317,13 +320,13 @@ export async function deployToChain(
         content = await readFile(absolutePath, 'utf-8');
       }
 
-      // Inject version script if versioning is enabled AND inscription origin is known
-      // The finalVersioningContract is now deployed BEFORE HTML inscription (Step 1.9),
+      // Inject version script if inscription origin is known
+      // The finalVersioningOriginInscription is now deployed BEFORE HTML inscription (Step 1.9),
       // so it's always available for script injection on both first and subsequent deployments
-      if (enableVersioning && finalVersioningContract) {
+      if (finalVersioningOriginInscription) {
         content = await injectVersionScript(
           content,
-          finalVersioningContract // This is the inscription origin outpoint
+          finalVersioningOriginInscription // This is the inscription origin outpoint
         );
 
         if (dryRun) {
@@ -377,8 +380,8 @@ export async function deployToChain(
 
     callbacks?.onInscriptionComplete?.(filePath, result.inscription.urlPath);
 
-    // Estimate cost (rough approximation)
-    totalCost += Math.ceil(((result.inscription.size + 200) / 1000) * (satsPerKb || 50)) + 1;
+    // Calculate cost using proper estimation (only for newly inscribed files, not cached)
+    totalCost += estimateInscriptionCost(result.inscription.size, satsPerKb || 50);
 
     // Small delay between inscriptions (only needed if NOT using change UTXO)
     if (i < order.length - 1 && !changeUtxo) {
@@ -398,22 +401,22 @@ export async function deployToChain(
   // Step 3: Update versioning inscription with version metadata
   //
   // TWO DEPLOYMENT PATHS:
-  // 1. FIRST DEPLOYMENT (no --versioning-contract flag):
+  // 1. FIRST DEPLOYMENT (no --versioning-origin-inscription flag):
   //    - Empty versioning inscription was deployed in Step 1.9
-  //    - finalVersioningContract is the origin (empty inscription)
+  //    - finalVersioningOriginInscription is the origin (empty inscription)
   //    - Now we spend it to add the first version metadata
   //
-  // 2. SUBSEQUENT DEPLOYMENT (--versioning-contract flag provided):
-  //    - finalVersioningContract = versioningContract (origin from CLI)
+  // 2. SUBSEQUENT DEPLOYMENT (--versioning-origin-inscription flag provided):
+  //    - finalVersioningOriginInscription = versioningOriginInscription (origin from CLI)
   //    - We spend the latest inscription in the chain to add new version metadata
   let latestVersioningInscription: string | undefined;
 
-  if (enableVersioning && version && finalVersioningContract) {
-    if (!versioningContract) {
+  if (finalVersioningOriginInscription) {
+    if (!versioningOriginInscription) {
       // PATH 1: FIRST DEPLOYMENT - Update the empty inscription we deployed in Step 1.9
       if (dryRun) {
         // DRY RUN MODE - Mock the update
-        latestVersioningInscription = `${finalVersioningContract.split('_')[0]}_1`; // Mock spending creates new outpoint
+        latestVersioningInscription = `${finalVersioningOriginInscription.split('_')[0]}_1`; // Mock spending creates new outpoint
       } else if (VERSIONING_ENABLED) {
         currentInscriptionIndex++;
         callbacks?.onInscriptionStart?.(
@@ -426,7 +429,7 @@ export async function deployToChain(
             entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
 
           latestVersioningInscription = await updateVersioningInscription(
-            finalVersioningContract, // Spend the empty inscription we created
+            finalVersioningOriginInscription, // Spend the empty inscription we created
             paymentPk,
             paymentPk, // same key for ordPk
             version,
@@ -435,6 +438,10 @@ export async function deployToChain(
             destinationAddress,
             satsPerKb
           );
+          // Add versioning metadata txid immediately (maintains chronological order)
+          const metadataTxid = latestVersioningInscription.split('_')[0];
+          txids.add(metadataTxid);
+
           callbacks?.onInscriptionComplete?.(
             'versioning-metadata',
             `/content/${latestVersioningInscription}`
@@ -459,7 +466,7 @@ export async function deployToChain(
         );
         try {
           latestVersioningInscription = await updateVersioningInscription(
-            versioningContract, // origin outpoint of versioning inscription chain
+            versioningOriginInscription, // origin outpoint of versioning inscription chain
             paymentPk,
             paymentPk, // same key for ordPk
             version,
@@ -468,6 +475,10 @@ export async function deployToChain(
             destinationAddress,
             satsPerKb
           );
+          // Add versioning metadata txid immediately (maintains chronological order)
+          const metadataTxid = latestVersioningInscription.split('_')[0];
+          txids.add(metadataTxid);
+
           callbacks?.onInscriptionComplete?.(
             'versioning-metadata',
             `/content/${latestVersioningInscription}`
@@ -491,14 +502,19 @@ export async function deployToChain(
 
   callbacks?.onDeploymentComplete?.(entryPoint.urlPath);
 
+  // Ensure versioning inscription is always set (required for all deployments)
+  if (!finalVersioningOriginInscription) {
+    throw new Error('Versioning inscription origin was not set. This should not happen.');
+  }
+
   return {
     entryPointUrl: entryPoint.urlPath,
     inscriptions,
     totalCost,
     totalSize,
     txids: Array.from(txids),
-    versioningContract: finalVersioningContract,
-    latestVersioningInscription,
+    versioningOriginInscription: finalVersioningOriginInscription,
+    versioningLatestInscription: latestVersioningInscription,
     version: version,
     versionDescription: versionDescription,
     buildDir,
@@ -511,6 +527,15 @@ export async function deployToChain(
  * Generates a deployment manifest file
  */
 export function generateManifest(result: DeploymentResult): DeploymentManifest {
+  // Calculate statistics for new vs cached files
+  const newFiles = result.inscriptions.filter((f) => !f.cached);
+  const cachedFiles = result.inscriptions.filter((f) => f.cached);
+
+  // Count transactions for new file inscriptions
+  const newFileTransactions = result.txids.filter((txid) =>
+    newFiles.some((file) => file.txid === txid)
+  );
+
   return {
     timestamp: new Date().toISOString(),
     entryPoint: result.entryPointUrl,
@@ -518,14 +543,16 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     totalFiles: result.inscriptions.length,
     totalCost: result.totalCost,
     totalSize: result.totalSize,
-    transactions: result.txids,
-    originVersioningInscription: result.versioningContract,
-    latestVersioningInscription: result.latestVersioningInscription,
+    transactions: result.txids, // All transactions (files + versioning)
+    latestVersioningInscription: result.versioningLatestInscription,
     version: result.version,
     versionDescription: result.versionDescription,
     buildDir: result.buildDir,
     destinationAddress: result.destinationAddress,
     ordinalContentUrl: result.ordinalContentUrl,
+    newFiles: newFiles.length,
+    cachedFiles: cachedFiles.length,
+    newTransactions: newFileTransactions.length,
   };
 }
 
@@ -546,7 +573,8 @@ export async function saveManifest(
  */
 export async function saveManifestWithHistory(
   manifest: DeploymentManifest,
-  outputPath: string
+  outputPath: string,
+  originVersioningInscription: string
 ): Promise<DeploymentManifestHistory> {
   let history: DeploymentManifestHistory;
 
@@ -566,39 +594,36 @@ export async function saveManifestWithHistory(
         history.totalDeployments = history.deployments.length;
 
         // Keep existing originVersioningInscription (origin) - it never changes
-        // Only set it if not already set and this deployment has one
-        if (!history.originVersioningInscription && manifest.originVersioningInscription) {
-          history.originVersioningInscription = manifest.originVersioningInscription;
+        // Only set it if not already set
+        if (!history.originVersioningInscription) {
+          history.originVersioningInscription = originVersioningInscription;
         }
       } else if ('timestamp' in parsed && 'entryPoint' in parsed) {
         // Old format - migrate to new format
         const oldManifest = parsed as DeploymentManifest;
 
-        // Migrate old versioningContract field to latestVersioningInscription for backward compatibility
-        const migratedOldManifest = {
-          ...oldManifest,
-          latestVersioningInscription: '',
-        };
+        // Remove old originVersioningInscription field if it exists for backward compatibility
+        const { originVersioningInscription: _, ...cleanedOldManifest } = oldManifest as any;
 
         history = {
           manifestVersion: '1.0.0',
-          originVersioningInscription: manifest.originVersioningInscription,
+          originVersioningInscription: originVersioningInscription,
           totalDeployments: 2, // Old deployment + new deployment
-          deployments: [migratedOldManifest, manifest],
+          deployments: [cleanedOldManifest, manifest],
         };
       } else {
         // Unknown format - start fresh
         console.warn('⚠️  Warning: Unknown manifest format, creating new history');
-        history = createNewHistory(manifest);
+        history = createNewHistory(manifest, originVersioningInscription);
       }
     } catch (error) {
       // Error reading/parsing - start fresh
       console.warn('⚠️  Warning: Could not read existing manifest, creating new history');
-      history = createNewHistory(manifest);
+      history = createNewHistory(manifest, originVersioningInscription);
     }
   } else {
     // No existing manifest - create new history
-    history = createNewHistory(manifest);
+    history = createNewHistory(manifest, originVersioningInscription);
   }
 
   // Save updated history
@@ -611,10 +636,13 @@ export async function saveManifestWithHistory(
 /**
  * Helper function to create a new deployment history
  */
-function createNewHistory(manifest: DeploymentManifest): DeploymentManifestHistory {
+function createNewHistory(
+  manifest: DeploymentManifest,
+  originVersioningInscription: string
+): DeploymentManifestHistory {
   return {
     manifestVersion: '1.0.0',
-    originVersioningInscription: manifest.originVersioningInscription,
+    originVersioningInscription: originVersioningInscription,
     totalDeployments: 1,
     deployments: [manifest],
   };

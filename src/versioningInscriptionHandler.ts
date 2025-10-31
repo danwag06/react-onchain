@@ -2,14 +2,14 @@
  * Versioning Inscription Handler
  *
  * Handles deployment and interaction with ordinal-based versioning inscriptions.
- * Uses inscription metadata instead of smart contracts for lightweight version tracking.
+ * Uses inscription metadata for lightweight version tracking.
  */
 
 import type { PrivateKey } from '@bsv/sdk';
-import { createOrdinals, sendOrdinals, Utxo } from 'js-1sat-ord';
+import { createOrdinals, sendOrdinals } from 'js-1sat-ord';
 import { createIndexer } from './config.js';
 import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
-import { IndexerService, GorillaPoolUtxo } from './services/IndexerService.js';
+import { IndexerService } from './services/IndexerService.js';
 
 let _indexer: IndexerService | null = null;
 

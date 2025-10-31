@@ -86,7 +86,7 @@ export const config = {
   appName: process.env.APP_NAME,
   versionTag: process.env.VERSION_TAG,
   versionDescription: process.env.VERSION_DESCRIPTION,
-  versioningContract: process.env.VERSIONING_CONTRACT,
+  versioningOriginDescription: process.env.VERSIONING_ORIGIN_INSCRIPTION,
 
   // Advanced options
   buildDir: getEnvOrDefault('BUILD_DIR', DEFAULT_CONFIG.buildDir),

@@ -19,12 +19,12 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 - **Complete On-Chain Deployment**: Entire React app lives on the blockchain
 - **Automatic Dependency Resolution**: Analyzes your build and inscribes files in the correct order
 - **Reference Rewriting**: Automatically updates all file references to use ordinals content URLs
-- **Ordinal Inscription Versioning**: Unlimited version history tracked via lightweight inscription metadata
+- **Built-in Versioning**: Every deployment is versioned with unlimited history tracked on-chain
 - **Decentralized & Extensible**: Open source architecture supports multiple indexer and content providers
 - **Framework Agnostic**: Works with Vite, Create React App, Next.js (static export), or any React build tool
 - **UTXO Chaining**: Efficiently chains UTXOs to avoid double-spend errors
 - **Dry Run Mode**: Test deployments without spending satoshis
-- **Deployment Manifest**: Generates a detailed JSON manifest of all inscribed files
+- **Smart Caching**: Reuses unchanged files from previous deployments to minimize costs
 
 ## Decentralized Architecture
 
@@ -44,7 +44,7 @@ See `src/services/IndexerService.ts` for the base interface and `src/services/go
 No installation needed! Just use `npx`:
 
 ```bash
-npx react-onchain deploy --build-dir ./dist --payment-key <WIF>
+npx react-onchain deploy
 ```
 
 **For developers/contributors:**
@@ -81,13 +81,21 @@ npm run build && npm run export
 
 ### 2. Deploy to blockchain
 
-**⚠️ Important:** Use a wallet that supports 1Sat Ordinals (we recommend [yours.org](https://yours.org)) to ensure your inscription UTXOs aren't accidentally spent. Regular wallets may not recognize 1-satoshi ordinal outputs and could spend them as regular funds.
+> **⚠️ Use an Ordinals-Compatible Wallet**
+>
+> Use a wallet that supports 1Sat Ordinals (we recommend [yours.org](https://yours.org)) to ensure your inscription UTXOs aren't accidentally spent. Regular wallets may not recognize 1-satoshi ordinal outputs and could spend them as regular funds, destroying your inscriptions permanently.
+
+Simply run the deploy command - the CLI will guide you through an interactive setup:
 
 ```bash
-npx react-onchain deploy \
-  --build-dir ./dist \
-  --payment-key <YOUR_WIF_PRIVATE_KEY>
+npx react-onchain deploy
 ```
+
+The interactive prompts will ask you for:
+
+- **Build directory**: Automatically detects common directories (dist, build, out, etc.)
+- **Payment key**: Your WIF private key for signing transactions
+- **Version information**: Optional version tag and description for versioning
 
 The destination address is automatically derived from your payment key.
 
@@ -99,102 +107,205 @@ The CLI will output the entry point URL:
 https://ordfs.network/content/<txid>_<vout>
 ```
 
-After your first deployment, a `.env` file is automatically created with your configuration. This means subsequent deployments only need the version information:
+After your first deployment, a `.env` file is automatically created with your configuration. This means subsequent deployments are even simpler - just run:
 
 ```bash
-npx react-onchain deploy \
-  --version-tag "1.1.0" \
-  --version-description "Bug fixes and improvements"
+npx react-onchain deploy
 ```
 
-All other configuration (payment key, build directory, versioning contract) is automatically loaded from `.env` and `deployment-manifest.json`. The destination address is automatically derived from your payment key.
+The CLI will:
+
+- Auto-detect your previous build directory
+- Load your payment key from `.env`
+- Load versioning configuration from `deployment-manifest.json`
+- Prompt you for the new version tag and description (optional)
+
+All configuration is automatically managed for you!
 
 ## CLI Usage
 
+### Commands
+
 ```bash
-# Deploy application
-npx react-onchain deploy [options]
+# Deploy application (interactive prompts)
+npx react-onchain deploy
 
 # Query version history (on-chain)
-npx react-onchain version:history <inscription>
+npx react-onchain version:history <versioningOriginInscription>
 
 # Get version details (on-chain)
-npx react-onchain version:info <inscription> <version>
+npx react-onchain version:info <versioningOriginInscription> <version>
 
 # Get inscription info (on-chain)
-npx react-onchain version:summary <inscription>
+npx react-onchain version:summary <versioningOriginInscription>
 
 # View deployment history (local)
 npx react-onchain manifest:history
 ```
 
-### Deploy Options
+### Interactive Deployment
 
-| Option                             | Alias | Description                                                  | Default  |
-| ---------------------------------- | ----- | ------------------------------------------------------------ | -------- |
-| `--build-dir <directory>`          | `-b`  | Build directory to deploy                                    | `./dist` |
-| `--payment-key <wif>`              | `-p`  | Payment private key in WIF format (destination auto-derived) | Required |
-| `--sats-per-kb <number>`           | `-s`  | Satoshis per KB for fees                                     | `1`      |
-| `--dry-run`                        |       | Test deployment without broadcasting                         | `false`  |
-| `--version-tag <string>`           |       | Version identifier (e.g., "1.0.0")                           | Optional |
-| `--version-description <string>`   |       | Changelog or release notes                                   | Optional |
-| `--versioning-contract <outpoint>` |       | Existing versioning inscription origin                       | Optional |
-| `--app-name <string>`              |       | Application name for new versioning inscription              | Optional |
-
-**Note:** After your first deployment, a `.env` file is auto-created with your configuration. Most options can then be omitted from the CLI and will be loaded automatically from `.env` and `deployment-manifest.json`.
-
-### Examples
-
-**Basic deployment:**
+The recommended way to deploy is using the interactive CLI, which guides you through the setup:
 
 ```bash
-npx react-onchain deploy \
-  --build-dir ./dist \
-  --payment-key L1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z
+npx react-onchain deploy
 ```
 
-**Dry run (test without spending):**
+The CLI will:
+
+1. **Detect your build directory** - Automatically finds common directories (dist, build, out, etc.)
+2. **Load saved configuration** - Reuses payment key and settings from `.env`
+3. **Prompt for missing values** - Only asks for information that isn't already configured
+4. **Show deployment preview** - Displays configuration before deploying
+5. **Request confirmation** - Asks you to confirm before spending satoshis
+
+**First deployment example:**
+
+```
+? Select build directory: ./dist
+? Enter payment private key (WIF): **********************
+? Enable versioning? Yes
+? Enter version tag (e.g., 1.0.0): 1.0.0
+? Enter version description: Initial release
+? Enter application name: MyDApp
+
+📋 Deployment Configuration
+──────────────────────────────────────
+  Build directory: ./dist
+  Fee rate:        1 sats/KB
+  Version:         1.0.0
+  Description:     Initial release
+  App name:        MyDApp (new versioning inscription)
+
+⚠️  This will inscribe files to the blockchain and spend satoshis.
+? Proceed with deployment? Yes
+
+🚀 Deploying to BSV Blockchain...
+```
+
+**Subsequent deployments:**
 
 ```bash
+npx react-onchain deploy
+```
+
+The CLI auto-loads everything from `.env` and only prompts for the new version information!
+
+### Advanced: CLI Flags
+
+For automation or CI/CD pipelines, you can bypass interactive prompts using flags:
+
+| Flag                                         | Alias | Description                                                  | Default  |
+| -------------------------------------------- | ----- | ------------------------------------------------------------ | -------- |
+| `--build-dir <directory>`                    | `-b`  | Build directory to deploy                                    | `./dist` |
+| `--payment-key <wif>`                        | `-p`  | Payment private key in WIF format (destination auto-derived) | Prompted |
+| `--sats-per-kb <number>`                     | `-s`  | Satoshis per KB for fees                                     | `1`      |
+| `--dry-run`                                  |       | Test deployment without broadcasting                         | `false`  |
+| `--version-tag <string>`                     |       | Version identifier (e.g., "1.0.0")                           | Prompted |
+| `--version-description <string>`             |       | Changelog or release notes                                   | Prompted |
+| `--versioning-origin-inscription <outpoint>` |       | Existing versioning inscription origin                       | Auto     |
+| `--app-name <string>`                        |       | Application name for new versioning inscription              | Prompted |
+
+**Automated deployment example:**
+
+```bash
+# First deployment with flags (no prompts)
 npx react-onchain deploy \
   --build-dir ./dist \
   --payment-key L1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z \
-  --dry-run
-```
+  --version-tag "1.0.0" \
+  --version-description "Initial release" \
+  --app-name "MyDApp"
 
-**Custom fee rate:**
-
-```bash
+# Subsequent deployment (config auto-loaded from .env)
 npx react-onchain deploy \
-  --build-dir ./dist \
-  --payment-key <YOUR_WIF> \
-  --sats-per-kb 100
+  --version-tag "1.1.0" \
+  --version-description "Bug fixes"
+
+# Dry run (test without spending)
+npx react-onchain deploy --dry-run
+
+# Custom fee rate
+npx react-onchain deploy --sats-per-kb 100
 ```
+
+**Note:** When flags are provided, interactive prompts are automatically skipped. This is perfect for CI/CD automation.
 
 ## Deployment Output
 
-After successful deployment, you'll see:
+After successful deployment, you'll see detailed information about inscribed files:
 
 ```
-📊 Deployment Summary:
-
+⚡ Inscribing to BSV Blockchain
 ──────────────────────────────────────────────────────────────────────
-File                                    Size           TXID
-──────────────────────────────────────────────────────────────────────
-index.html                              2.45 KB        abc123def456...
-assets/index-abc123.js                  145.23 KB      def456ghi789...
-assets/index-def456.css                 12.34 KB       ghi789jkl012...
-assets/logo.svg                         2.11 KB        jkl012mno345...
-──────────────────────────────────────────────────────────────────────
-TOTAL                                   162.13 KB      4 files
+✓ assets/react-CHdo91hT.svg           → 494c43a6...
+✓ vite.svg                            → 712d1b3c...
+✓ assets/index-B7tBotfE.js            → 896b0d05...
+✓ assets/index-COcDBgFa.css           → 58b02b11...
+✓ index.html                          → f16f3780...
+✓ versioning-metadata                 → 7b1c2bc4...
 ──────────────────────────────────────────────────────────────────────
 
-✨ Deployment complete!
-Entry point: https://ordfs.network/content/abc123def456_0
+╔═══════════════════════════════════════════════════════════════════╗
+║                     Deployment Complete!                          ║
+╚═══════════════════════════════════════════════════════════════════╝
 
-Manifest saved to: deployment-manifest.json
-Configuration saved to: .env
+📄 New Inscriptions
+──────────────────────────────────────────────────────────────────────
+ 1. index.html                          6.03 KB    f16f3780...
+ 2. versioning-metadata                 1.25 KB    7b1c2bc4...
+──────────────────────────────────────────────────────────────────────
+  SUBTOTAL                               7.28 KB    2 files
+──────────────────────────────────────────────────────────────────────
+
+📦 Cached Files (Reused)
+──────────────────────────────────────────────────────────────────────
+ 1. assets/react-CHdo91hT.svg           4.03 KB    494c43a6...
+ 2. vite.svg                            1.46 KB    712d1b3c...
+ 3. assets/index-B7tBotfE.js            223.33 KB  896b0d05...
+ 4. assets/index-COcDBgFa.css           1.35 KB    58b02b11...
+──────────────────────────────────────────────────────────────────────
+  SUBTOTAL                               230.17 KB  4 files
+──────────────────────────────────────────────────────────────────────
+
+📊 Total
+──────────────────────────────────────────────────────────────────────
+  TOTAL                                  237.45 KB  6 files
+──────────────────────────────────────────────────────────────────────
+
+📊 Deployment Stats
+──────────────────────────────────────────────────────────────────────
+  New files:        2 (7.28 KB)
+  Cached files:     4
+  Total files:      6 (237.45 KB)
+  Inscription cost: ~8 satoshis
+  Transactions:     2
+──────────────────────────────────────────────────────────────────────
+
+📦 Versioning
+──────────────────────────────────────────────────────────────────────
+  Origin Inscription: f852b8a7...
+  Version:            1.0.1
+  Version redirect:   ✓ Enabled
+──────────────────────────────────────────────────────────────────────
+
+✨ Entry Point
+https://ordfs.network/content/f16f3780...
+
+📁 Files Saved
+  • deployment-manifest.json
+  • .env (configuration for next deployment)
 ```
+
+### Smart Caching
+
+Notice the "Cached Files (Reused)" section? `react-onchain` intelligently reuses files from previous deployments when content hasn't changed. This dramatically reduces costs for subsequent deployments - you only pay to inscribe what actually changed!
+
+In the example above:
+
+- **New inscriptions**: 2 files (7.28 KB) - only index.html and versioning metadata changed
+- **Cached files**: 4 files (230.17 KB) - assets remain unchanged and are reused
+- **Cost savings**: ~97% reduction (inscribed 7.28 KB instead of 237.45 KB)
 
 ## Custom Domains
 
@@ -222,35 +333,63 @@ To: https://ordfs.network/content/<ORIGIN>?version=latest
 
 This ensures users always get redirected to the most recent deployment while maintaining the ability to access specific versions when needed.
 
-## On-Chain Versioning
+## Versioning
 
-Deploy your React app with on-chain version tracking using lightweight inscription metadata. Users can access specific versions via URL parameters, enabling safe rollbacks and version pinning.
+All deployments are automatically versioned with on-chain history tracking. Users can access specific versions via URL parameters, enabling safe rollbacks and version pinning.
 
 ### How It Works
 
-1. **First Deployment**: Creates a versioning inscription with metadata containing version-to-outpoint mappings
-2. **Subsequent Deployments**: Spends the previous inscription and merges metadata, creating an unlimited version history chain
-3. **Version Redirect**: Injected script queries inscription metadata via `ordfs.network` to resolve version queries
-4. **Built-in Latest**: Use `?seq=-1` to always access the latest version via ordfs.network's origin chain resolution
+1. **First Deployment**: Creates a versioning inscription origin with metadata containing version-to-outpoint mappings
+2. **Subsequent Deployments**: Spends the previous inscription and adds new version metadata, creating an unlimited version history chain
+3. **Version Redirect**: Automatically injected script queries inscription metadata to resolve version queries
+4. **Always Latest**: Use `?seq=-1` to always access the latest version via ordfs.network's origin chain resolution
 
 ### First Deployment
 
-Deploy your first version and create a versioning inscription:
+The interactive CLI guides you through deploying your first version:
+
+```bash
+npx react-onchain deploy
+```
+
+You'll be prompted for all necessary information:
+
+```
+? Select build directory: ./dist
+? Payment key (WIF format): **********************
+? App name (for versioning): MyDApp
+? Version tag: 1.0.0
+? Version description: Initial release
+```
+
+After deployment, a `.env` file is automatically created containing all your configuration (payment key, build directory, app name, and versioning inscription). The destination address is automatically derived from your payment key. This file is in `.gitignore` to protect your private keys.
+
+**Or use flags for automation:**
 
 ```bash
 npx react-onchain deploy \
   --build-dir ./dist \
   --payment-key <WIF> \
+  --app-name "MyDApp" \
   --version-tag "1.0.0" \
-  --version-description "Initial release" \
-  --app-name "MyDApp"
+  --version-description "Initial release"
 ```
-
-After deployment, a `.env` file is automatically created containing all your configuration (payment key, build directory, and versioning contract). The destination address is automatically derived from your payment key. This file is in `.gitignore` to protect your private keys.
 
 ### Subsequent Deployments
 
-After your first deployment, you only need to specify the new version information:
+After your first deployment, subsequent versions are incredibly simple:
+
+```bash
+npx react-onchain deploy
+```
+
+The CLI will:
+
+- Auto-load all configuration from `.env` and `deployment-manifest.json`
+- Prompt you only for the new version information
+- Automatically inject version redirect script
+
+**Or with flags:**
 
 ```bash
 npx react-onchain deploy \
@@ -258,18 +397,12 @@ npx react-onchain deploy \
   --version-description "Added dark mode and bug fixes"
 ```
 
-All other configuration is automatically loaded from `.env` and `deployment-manifest.json`.
-
 Version redirect script is automatically injected starting with the second deployment, enabling `?version=` URL parameters.
 
 ### Accessing Versions
 
-- **Direct**: `<ENTRY_POINT_URL>` - loads current deployment
-- **Latest via inscription**: `https://ordfs.network/content/<ORIGIN>?seq=-1` - always serves latest
-- **Latest via redirect**: `<ENTRY_POINT_URL>?version=latest` - redirects to latest
+- **Latest via inscription**: `https://ordfs.network/content/<ORIGIN>` - always serves latest location
 - **Specific version**: `<ENTRY_POINT_URL>?version=1.0.0` - redirects to specific version
-
-**Note:** Unlike the previous smart contract approach, inscription-based versioning has **unlimited** version history. All version metadata is stored in the inscription chain and automatically merges when spending.
 
 ### Custom Domains
 
@@ -281,15 +414,6 @@ https://ordfs.network/content/<ORIGIN>?seq=-1
 ```
 
 Or point to the entry point and let users control versions via `?version=` parameter.
-
-### Versioning CLI Options
-
-| Option                             | Description                                      |
-| ---------------------------------- | ------------------------------------------------ |
-| `--version-tag <string>`           | Version identifier (e.g., "1.0.0")               |
-| `--version-description <string>`   | Changelog or release notes                       |
-| `--versioning-contract <outpoint>` | Existing inscription origin (subsequent deploys) |
-| `--app-name <string>`              | Application name (for first deployment)          |
 
 ### Querying Version Information
 
@@ -303,6 +427,15 @@ npx react-onchain version:info <INSCRIPTION_ORIGIN> <VERSION>
 # Get inscription information
 npx react-onchain version:summary <INSCRIPTION_ORIGIN>
 ```
+
+**Advanced: Versioning CLI flags** (for automation/CI-CD):
+
+| Flag                                         | Description                                      |
+| -------------------------------------------- | ------------------------------------------------ |
+| `--version-tag <string>`                     | Version identifier (e.g., "1.0.0")               |
+| `--version-description <string>`             | Changelog or release notes                       |
+| `--versioning-origin-inscription <outpoint>` | Existing inscription origin (subsequent deploys) |
+| `--app-name <string>`                        | Application name (for first deployment)          |
 
 ## Deployment Manifest
 

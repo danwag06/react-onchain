@@ -125,7 +125,7 @@
         console.log('[react-onchain] Redirecting to:', targetOutpoint);
 
         // Build redirect URL (use relative path for portability)
-        const newUrl = `/content/${targetOutpoint}${window.location.hash}`;
+        const newUrl = `/content/${targetOutpoint}${window.location.search}${window.location.hash}`;
 
         window.location.href = newUrl;
       } else {

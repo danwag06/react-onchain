@@ -95,19 +95,17 @@ npm run format:check
 ```
 react-onchain/
 ├── src/
-│   ├── cli.ts                  # CLI entry point
-│   ├── orchestrator.ts         # Main deployment orchestration
-│   ├── inscriber.ts           # File inscription logic
-│   ├── analyzer.ts            # Build directory analysis
-│   ├── rewriter.ts            # URL rewriting for inscribed files
-│   ├── retryUtils.ts          # Retry logic with exponential backoff
-│   ├── config.ts              # Configuration and environment variables
-│   ├── types.ts               # TypeScript type definitions
-│   ├── versioningContractHandler.ts  # Smart contract interaction
-│   └── contracts/             # sCrypt smart contracts
-├── tests/                     # Test files
-├── artifacts/                 # Compiled contract artifacts
-└── dist/                      # Compiled JavaScript output
+│   ├── cli.ts                           # CLI entry point
+│   ├── orchestrator.ts                  # Main deployment orchestration
+│   ├── inscriber.ts                     # File inscription logic
+│   ├── analyzer.ts                      # Build directory analysis
+│   ├── rewriter.ts                      # URL rewriting for inscribed files
+│   ├── retryUtils.ts                    # Retry logic with exponential backoff
+│   ├── config.ts                        # Configuration and environment variables
+│   ├── types.ts                         # TypeScript type definitions
+│   ├── versioningInscriptionHandler.ts  # Inscription handling for versioning
+├── tests/                               # Test files
+└── dist/                                # Compiled JavaScript output
 ```
 
 ## Submitting Changes
