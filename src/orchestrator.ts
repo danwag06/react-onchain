@@ -3,7 +3,7 @@ import { existsSync } from 'fs';
 import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
-import { rewriteFile, injectVersionScript } from './rewriter.js';
+import { rewriteFile, injectVersionScript, injectBasePathFix } from './rewriter.js';
 import { inscribeFile, estimateInscriptionCost } from './inscriber.js';
 import {
   deployVersioningInscription,
@@ -318,6 +318,13 @@ export async function deployToChain(
       // Read the HTML content if not already read
       if (!content) {
         content = await readFile(absolutePath, 'utf-8');
+      }
+
+      // Inject base path fix script (MUST run before React loads)
+      content = await injectBasePathFix(content);
+
+      if (dryRun) {
+        console.log('📝 Base path fix script injected (dry-run mode)');
       }
 
       // Inject version script if inscription origin is known

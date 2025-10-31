@@ -410,7 +410,7 @@ Point your domain to always serve the latest version:
 
 ```
 # DNS/CDN redirect to always get latest
-https://ordfs.network/content/<ORIGIN>?seq=-1
+https://ordfs.network/content/<ORIGIN>
 ```
 
 Or point to the entry point and let users control versions via `?version=` parameter.

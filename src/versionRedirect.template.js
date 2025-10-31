@@ -14,6 +14,37 @@
   const requestedVersion = params.get('version');
 
   /**
+   * Sets the base path for the application after version resolution
+   * This configures both the HTML <base> tag and React Router's basename
+   */
+  function setBasePath(outpoint) {
+    const basePath = `/content/${outpoint}`;
+
+    // Set/update <base> tag for automatic URL resolution
+    let baseTag = document.querySelector('base');
+    if (!baseTag) {
+      baseTag = document.createElement('base');
+      const head = document.head || document.getElementsByTagName('head')[0];
+      if (head.firstChild) {
+        head.insertBefore(baseTag, head.firstChild);
+      } else {
+        head.appendChild(baseTag);
+      }
+    }
+    baseTag.href = basePath + '/'; // MUST have trailing slash
+
+    // Set global for React Router (no trailing slash)
+    window.__REACT_ONCHAIN_BASE__ = basePath;
+
+    // Helper function for apps
+    window.__getReactOnchainBase = function () {
+      return basePath;
+    };
+
+    console.log('[react-onchain] Base path configured:', basePath);
+  }
+
+  /**
    * Main redirect logic
    * 1. If ?version param exists, redirect to that specific version
    * 2. If no ?version param, check if latest is different from origin and redirect if needed
@@ -43,8 +74,10 @@
       console.log('[react-onchain] Version metadata loaded:', metadata);
 
       // Get current outpoint from URL
+      // Handle trailing slash: /content/abc_0/ → abc_0
       const currentPath = window.location.pathname;
-      const currentOutpoint = currentPath.split('/').pop();
+      const pathParts = currentPath.split('/').filter(part => part.length > 0);
+      const currentOutpoint = pathParts[pathParts.length - 1] || '';
       console.log('[react-onchain] Current outpoint:', currentOutpoint);
 
       let targetOutpoint = null;
@@ -112,6 +145,10 @@
         // Check if we're already on the latest version
         if (latestVersion.outpoint === currentOutpoint) {
           console.log('[react-onchain] Already on latest version');
+          // Log the current version info
+          console.log(`%c[react-onchain] Version: ${latestVersion.version} | Deployment: /content/${currentOutpoint}`, 'color: #22c55e; font-weight: bold');
+          // Set base path for this final outpoint
+          setBasePath(currentOutpoint);
           return;
         }
 
@@ -124,16 +161,47 @@
       if (targetOutpoint && targetOutpoint !== currentOutpoint) {
         console.log('[react-onchain] Redirecting to:', targetOutpoint);
 
-        // Build redirect URL (use relative path for portability)
-        const newUrl = `/content/${targetOutpoint}${window.location.search}${window.location.hash}`;
+        // Extract the path after the current outpoint (e.g., /about-us from /content/abc_0/about-us)
+        const currentPathAfterOutpoint = currentPath.replace(`/content/${currentOutpoint}`, '');
 
+        // Build redirect URL preserving the subpath, query params, and hash
+        const newUrl = `/content/${targetOutpoint}${currentPathAfterOutpoint}${window.location.search}${window.location.hash}`;
+
+        console.log('[react-onchain] Preserving path:', currentPathAfterOutpoint);
         window.location.href = newUrl;
-      } else {
+      } else if (targetOutpoint === currentOutpoint) {
         console.log('[react-onchain] Already on the target version');
+        // Find version number for current outpoint
+        let currentVersionNumber = 'unknown';
+        for (const key in metadata) {
+          if (key.startsWith('version.')) {
+            try {
+              const versionData = JSON.parse(metadata[key]);
+              if (versionData.outpoint === currentOutpoint) {
+                currentVersionNumber = key.replace('version.', '');
+                break;
+              }
+            } catch (e) {
+              // Skip parse errors
+            }
+          }
+        }
+        console.log(`%c[react-onchain] Version: ${currentVersionNumber} | Deployment: /content/${currentOutpoint}`, 'color: #22c55e; font-weight: bold');
+        // Set base path for this final outpoint
+        setBasePath(currentOutpoint);
       }
     } catch (error) {
       console.error('[react-onchain] Version redirect failed:', error);
       console.error('[react-onchain] Staying on current version');
+      // Log deployment path even if version fetch failed
+      const currentPath = window.location.pathname;
+      const pathParts = currentPath.split('/').filter(part => part.length > 0);
+      const currentOutpoint = pathParts[pathParts.length - 1] || '';
+      console.log(`%c[react-onchain] Deployment: /content/${currentOutpoint}`, 'color: #ef4444; font-weight: bold');
+      // Set base path even if version fetch failed
+      if (currentOutpoint) {
+        setBasePath(currentOutpoint);
+      }
     }
   }
 

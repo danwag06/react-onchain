@@ -3,11 +3,13 @@ import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
 import type { BrowserIndexerConfig } from './services/IndexerService.js';
 
-// Script template path
+// Script template paths
 const VERSION_REDIRECT_SCRIPT_PATH = join(
   import.meta.dirname || __dirname,
   'versionRedirect.template.js'
 );
+
+const BASE_PATH_FIX_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'basePathFix.template.js');
 
 /**
  * Creates a mapping of original paths to inscription URL paths
@@ -217,6 +219,44 @@ export async function injectVersionScript(
   scriptContent = scriptContent.replace('__VERSION_INSCRIPTION_ORIGIN__', versionInscriptionOrigin);
 
   // Inject the script into the <head> section
+  const headMatch = htmlContent.match(/<head[^>]*>/i);
+  if (headMatch) {
+    const headTag = headMatch[0];
+    const insertPosition = headMatch.index! + headTag.length;
+
+    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
+
+    return (
+      htmlContent.substring(0, insertPosition) +
+      injectedScript +
+      htmlContent.substring(insertPosition)
+    );
+  } else {
+    // No <head> tag found, inject at the beginning
+    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
+    return injectedScript + htmlContent;
+  }
+}
+
+/**
+ * Injects the base path fix script into HTML content
+ * This script automatically detects ordfs deployment paths and sets the correct base href
+ * for React Router and other client-side routing libraries
+ *
+ * @param htmlContent - Original HTML content
+ * @returns Modified HTML with injected base path fix script
+ */
+export async function injectBasePathFix(htmlContent: string): Promise<string> {
+  // Read the base path fix script template
+  let scriptContent: string;
+  try {
+    scriptContent = await readFile(BASE_PATH_FIX_SCRIPT_PATH, 'utf-8');
+  } catch (error) {
+    console.warn('Could not load base path fix script template:', error);
+    return htmlContent;
+  }
+
+  // Inject the script into the <head> section (before any other scripts)
   const headMatch = htmlContent.match(/<head[^>]*>/i);
   if (headMatch) {
     const headTag = headMatch[0];

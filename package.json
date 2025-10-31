@@ -8,7 +8,7 @@
     "react-onchain": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && cp src/versionRedirect.template.js dist/ && npm run format",
+    "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run format",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "test": "echo \"Error: no test specified\" && exit 1",
