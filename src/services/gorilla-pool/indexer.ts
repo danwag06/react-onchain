@@ -6,9 +6,10 @@
 import axios from 'axios';
 import { IndexerService, GorillaPoolUtxo, UtxoQueryOptions } from '../IndexerService.js';
 import { GORILLA_POOL_INDEXER_URL, GORILLA_POOL_CONTENT_URL } from './constants.js';
-import { P2PKH, Transaction, Utils } from '@bsv/sdk';
+import { P2PKH, Script, Transaction, Utils } from '@bsv/sdk';
 import { VersionMetadata } from '../../versioningInscriptionHandler.js';
 import { Utxo } from 'js-1sat-ord';
+import { formatError } from '../../utils/errors.js';
 
 /**
  * IndexerService implementation for GorillaPool/1Sat Ordinals API
@@ -82,10 +83,8 @@ export class GorillaPoolIndexer extends IndexerService {
 
       return { metadata, utxo };
     } catch (error) {
-      console.error('Failed to get version metadata:', error);
-      throw new Error(
-        `Getting version metadata failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      console.error('Failed to get version metadata:', formatError(error));
+      throw new Error(`Getting version metadata failed: ${formatError(error)}`);
     }
   }
 
@@ -108,8 +107,16 @@ export class GorillaPoolIndexer extends IndexerService {
       }
 
       return response.data.txid;
-    } catch (error: any) {
-      throw new Error(`Broadcast failed: ${error.message}`);
+    } catch (error) {
+      console.error('  ❌ Broadcast error details:');
+      if (axios.isAxiosError(error)) {
+        console.error('  Status:', error.response?.status);
+        console.error('  Status text:', error.response?.statusText);
+        console.error('  Response data:', error.response?.data);
+        console.error('  Response headers:', error.response?.headers);
+      }
+      console.error('  Error:', formatError(error));
+      throw new Error(`Broadcast failed: ${formatError(error)}`);
     }
   }
 

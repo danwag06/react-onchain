@@ -42,7 +42,7 @@
   },
   "homepage": "https://github.com/danwag06/react-onchain#readme",
   "dependencies": {
-    "@bsv/sdk": "^1.1.23",
+    "@bsv/sdk": "^1.8.11",
     "@inquirer/prompts": "^7.9.0",
     "axios": "^1.13.1",
     "chalk": "^5.3.0",

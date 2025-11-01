@@ -1,12 +1,35 @@
 import { readFile } from 'fs/promises';
-import { PrivateKey } from '@bsv/sdk';
-import { createOrdinals } from 'js-1sat-ord';
+import {
+  fromUtxo,
+  OP,
+  P2PKH,
+  PrivateKey,
+  SatoshisPerKilobyte,
+  Script,
+  Transaction,
+  Utils,
+} from '@bsv/sdk';
+import { createOrdinals, B_PREFIX } from 'js-1sat-ord';
 import type { Utxo } from 'js-1sat-ord';
 import type { InscribedFile } from './types.js';
 import { createHash } from 'crypto';
-import { retryWithBackoff, shouldRetryError, isUtxoNotFoundError } from './retryUtils.js';
+import { retryWithBackoff, shouldRetryError, isUtxoNotFoundError } from './utils/retry.js';
 import type { IndexerService } from './services/IndexerService.js';
 import { CONTENT_PATH } from './services/gorilla-pool/constants.js';
+import { formatError } from './utils/errors.js';
+import {
+  INSCRIPTION_OUTPUT_SATS,
+  TX_OVERHEAD_BYTES,
+  UTXO_FETCH_BUFFER_SATS,
+  DRY_RUN_DELAY_MS,
+  RETRY_MAX_ATTEMPTS,
+  RETRY_INITIAL_DELAY_MS,
+  RETRY_MAX_DELAY_MS,
+} from './utils/constants.js';
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /**
  * Generates a mock transaction ID for dry-run mode
@@ -16,18 +39,138 @@ function generateMockTxid(filePath: string): string {
   return hash.substring(0, 64);
 }
 
-// /**
-//  * Convert IndexerService UTXO format to js-1sat-ord Utxo format
-//  * Note: js-1sat-ord expects base64 encoded scripts, IndexerService uses hex
-//  */
-// function convertToJsOrdUtxo(utxo: UTXO): Utxo {
-//   return {
-//     satoshis: utxo.satoshis,
-//     txid: utxo.txid,
-//     vout: utxo.vout,
-//     script: Buffer.from(utxo.script, 'hex').toString('base64'),
-//   };
-// }
+/**
+ * Loads file content from either a provided buffer or file path
+ */
+async function loadFileContent(filePath: string, content?: Buffer): Promise<Buffer> {
+  if (content !== undefined) {
+    return content;
+  }
+  return await readFile(filePath);
+}
+
+/**
+ * Creates a dry-run result without broadcasting to the network
+ */
+function createDryRunResult(
+  originalPath: string,
+  fileSize: number
+): { inscription: InscribedFile } {
+  const mockTxid = generateMockTxid(originalPath);
+  const vout = 0;
+  const urlPath = `${CONTENT_PATH}/${mockTxid}_${vout}`;
+
+  return {
+    inscription: {
+      originalPath,
+      txid: mockTxid,
+      vout,
+      urlPath,
+      size: fileSize,
+    },
+  };
+}
+
+/**
+ * Fee estimation result
+ */
+interface FeeEstimate {
+  estimatedTxSize: number;
+  estimatedFee: number;
+  requiredSats: number;
+  feeRate: number;
+}
+
+/**
+ * Estimates fees and required satoshis for a transaction
+ */
+function estimateFeeAndRequiredSats(fileSize: number, satsPerKb: number = 1): FeeEstimate {
+  const estimatedTxSize = fileSize + TX_OVERHEAD_BYTES;
+  const feeRate = satsPerKb;
+  const estimatedFee = Math.ceil((estimatedTxSize / 1000) * feeRate);
+  const requiredSats = estimatedFee + INSCRIPTION_OUTPUT_SATS;
+
+  return {
+    estimatedTxSize,
+    estimatedFee,
+    requiredSats,
+    feeRate,
+  };
+}
+
+/**
+ * Creates a formatted broadcast error
+ */
+function createBroadcastError(originalPath: string, error: unknown, fileType: string): Error {
+  const errorMsg = formatError(error);
+  return new Error(`Failed to broadcast ${fileType} transaction for ${originalPath}: ${errorMsg}`);
+}
+
+/**
+ * Helper function to fetch UTXOs from indexer
+ */
+async function fetchUtxosFromIndexer(
+  indexer: IndexerService,
+  paymentAddress: string,
+  feeEstimate: FeeEstimate
+): Promise<Utxo[]> {
+  const indexerUtxos = await indexer.listUnspent(paymentAddress, {
+    unspentValue: INSCRIPTION_OUTPUT_SATS,
+    estimateSize: feeEstimate.estimatedTxSize,
+    feePerKb: feeEstimate.feeRate,
+    additional: UTXO_FETCH_BUFFER_SATS,
+  });
+
+  if (!indexerUtxos || indexerUtxos.length === 0) {
+    throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
+  }
+
+  return indexerUtxos;
+}
+
+/**
+ * Parameters for UTXO selection
+ */
+interface UtxoSelectionParams {
+  paymentUtxo?: Utxo;
+  requiredSats: number;
+  indexer: IndexerService;
+  paymentAddress: string;
+  feeEstimate: FeeEstimate;
+}
+
+/**
+ * Selects UTXOs for a transaction, reusing change UTXO if available
+ */
+async function selectUtxosForTransaction(params: UtxoSelectionParams): Promise<Utxo[]> {
+  const { paymentUtxo, requiredSats, indexer, paymentAddress, feeEstimate } = params;
+
+  // No change UTXO provided - fetch fresh UTXOs
+  if (!paymentUtxo) {
+    return await fetchUtxosFromIndexer(indexer, paymentAddress, feeEstimate);
+  }
+
+  // Change UTXO has sufficient funds - use it alone
+  if (paymentUtxo.satoshis >= requiredSats) {
+    return [paymentUtxo];
+  }
+
+  // Change UTXO insufficient - combine with fresh UTXOs
+  const additionalUtxos = await fetchUtxosFromIndexer(indexer, paymentAddress, feeEstimate);
+  return [paymentUtxo, ...additionalUtxos];
+}
+
+/**
+ * Finds the inscription output index (1-sat output)
+ */
+function findInscriptionOutputIndex(tx: Transaction): number {
+  for (let i = 0; i < tx.outputs.length; i++) {
+    if (tx.outputs[i].satoshis === INSCRIPTION_OUTPUT_SATS) {
+      return i;
+    }
+  }
+  return 0; // Default to first output if not found
+}
 
 /**
  * Inscribes a single file on-chain (or simulates in dry-run mode)
@@ -39,104 +182,42 @@ export async function inscribeFile(
   destinationAddress: string,
   paymentKey: PrivateKey,
   indexer: IndexerService,
-  content?: string,
+  content?: Buffer,
   satsPerKb?: number,
   dryRun?: boolean,
   paymentUtxo?: Utxo
 ): Promise<{ inscription: InscribedFile; changeUtxo?: Utxo }> {
-  // Read file content (use provided content if available, otherwise read from file)
-  let fileContent: string;
-  if (content !== undefined) {
-    fileContent = content;
-  } else {
-    const buffer = await readFile(filePath);
-    fileContent = buffer.toString('utf-8');
-  }
-
-  const fileSize = Buffer.from(fileContent).length;
+  const fileBuffer = await loadFileContent(filePath, content);
+  const fileSize = fileBuffer.length;
 
   // DRY RUN MODE - Simulate without broadcasting
   if (dryRun) {
-    const mockTxid = generateMockTxid(originalPath);
-    const vout = 0;
-    // Use relative URL path for maximum portability across service providers
-    const urlPath = `${CONTENT_PATH}/${mockTxid}_${vout}`;
-
-    // Small delay to simulate network activity
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    return {
-      inscription: {
-        originalPath,
-        txid: mockTxid,
-        vout,
-        urlPath,
-        size: fileSize,
-      },
-    };
+    await new Promise((resolve) => setTimeout(resolve, DRY_RUN_DELAY_MS));
+    return createDryRunResult(originalPath, fileSize);
   }
 
   // REAL MODE - Actually inscribe on-chain
-  // Convert content to base64
-  const dataB64 = Buffer.from(fileContent).toString('base64');
-
-  // Estimate required funding
-  // Rough estimate: inscription data + 500 bytes overhead (inputs, outputs, signatures)
-  const estimatedTxSize = fileSize + 500;
-  const feeRate = satsPerKb || 50;
-  const estimatedFee = Math.ceil((estimatedTxSize / 1000) * feeRate);
-  const requiredSats = estimatedFee + 1; // +1 for inscription output
-
-  // Fetch UTXOs and build transaction ONCE (outside retry loop)
-  let utxos: Utxo[];
+  const contentBase64 = fileBuffer.toString('base64');
+  const feeEstimate = estimateFeeAndRequiredSats(fileSize, satsPerKb);
   const paymentAddress = paymentKey.toAddress().toString();
 
-  if (paymentUtxo) {
-    // Check if the change UTXO has enough funds
-    if (paymentUtxo.satoshis >= requiredSats) {
-      // Use the provided UTXO (change from previous transaction)
-      utxos = [paymentUtxo];
-    } else {
-      // Change Utxos is insufficient, fetch additional Utxos
-      const indexerUtxos = await indexer.listUnspent(paymentAddress, {
-        unspentValue: 1, // 1 sat for inscription output
-        estimateSize: estimatedTxSize,
-        feePerKb: feeRate,
-        additional: 100, // Small buffer
-      });
+  // Select UTXOs for transaction
+  let selectedUtxos = await selectUtxosForTransaction({
+    paymentUtxo,
+    requiredSats: feeEstimate.requiredSats,
+    indexer,
+    paymentAddress,
+    feeEstimate,
+  });
 
-      if (!indexerUtxos || indexerUtxos.length === 0) {
-        throw new Error(`No additional UTXOs found for payment address ${paymentAddress}`);
-      }
-
-      // Combine change UTXO with fresh UTXOs
-      utxos = [paymentUtxo, ...indexerUtxos];
-    }
-  } else {
-    // No change UTXO, fetch UTXOs from indexer with funding requirements
-    const indexerUtxos = await indexer.listUnspent(paymentAddress, {
-      unspentValue: 1, // 1 sat for inscription output
-      estimateSize: estimatedTxSize,
-      feePerKb: feeRate,
-      additional: 100, // Small buffer
-    });
-
-    if (!indexerUtxos || indexerUtxos.length === 0) {
-      throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
-    }
-
-    // Convert IndexerService UTXOs to js-1sat-ord format
-    utxos = indexerUtxos;
-  }
-
-  // Build the inscription transaction ONCE
-  let result = await createOrdinals({
-    utxos,
+  // Build the inscription transaction
+  let inscriptionResult = await createOrdinals({
+    utxos: selectedUtxos,
     destinations: [
       {
         address: destinationAddress,
         inscription: {
-          dataB64,
+          dataB64: contentBase64,
           contentType,
         },
       },
@@ -145,43 +226,26 @@ export async function inscribeFile(
     satsPerKb,
   });
 
-  // Only retry the broadcast (transaction is already built)
+  // Broadcast with retry and UTXO error recovery
   const txid = await retryWithBackoff(
     async () => {
-      // Broadcast the transaction via IndexerService
       try {
-        const txid = await indexer.broadcastTransaction(result.tx.toHex());
-        return txid;
+        return await indexer.broadcastTransaction(inscriptionResult.tx.toHex());
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
+        // If UTXO error and we're NOT using a provided paymentUtxo, rebuild transaction
+        const isRecoverableUtxoError = !paymentUtxo && isUtxoNotFoundError(error as Error);
 
-        // If UTXO error and we're NOT using a provided paymentUtxo, try to rebuild transaction
-        if (
-          !paymentUtxo &&
-          isUtxoNotFoundError(error instanceof Error ? error : new Error(errorMsg))
-        ) {
-          // Refetch UTXOs with funding requirements
-          const indexerUtxos = await indexer.listUnspent(paymentAddress, {
-            unspentValue: 1,
-            estimateSize: estimatedTxSize,
-            feePerKb: feeRate,
-            additional: 100,
-          });
+        if (isRecoverableUtxoError) {
+          // Refetch UTXOs and rebuild transaction
+          selectedUtxos = await fetchUtxosFromIndexer(indexer, paymentAddress, feeEstimate);
 
-          if (!indexerUtxos || indexerUtxos.length === 0) {
-            throw new Error(`No UTXOs found for payment address ${paymentAddress}`);
-          }
-
-          // Convert and rebuild transaction with fresh UTXOs
-          utxos = indexerUtxos;
-
-          result = await createOrdinals({
-            utxos,
+          inscriptionResult = await createOrdinals({
+            utxos: selectedUtxos,
             destinations: [
               {
                 address: destinationAddress,
                 inscription: {
-                  dataB64,
+                  dataB64: contentBase64,
                   contentType,
                 },
               },
@@ -191,36 +255,20 @@ export async function inscribeFile(
           });
         }
 
-        throw new Error(
-          `Failed to broadcast inscription transaction for ${originalPath}: ${errorMsg}`
-        );
+        throw createBroadcastError(originalPath, error, 'inscription');
       }
     },
     {
-      maxAttempts: 5,
-      initialDelayMs: 2000,
-      maxDelayMs: 30000,
+      maxAttempts: RETRY_MAX_ATTEMPTS,
+      initialDelayMs: RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: RETRY_MAX_DELAY_MS,
     },
     shouldRetryError
   );
 
-  const tx = result.tx;
-  const payChange = result.payChange;
-
-  // Find the inscription output - it's the 1-sat output to the destination address
-  let vout = 0;
-
-  for (let i = 0; i < tx.outputs.length; i++) {
-    const output = tx.outputs[i];
-
-    // The inscription output is always 1 satoshi
-    if (output.satoshis === 1) {
-      vout = i;
-      break;
-    }
-  }
-
-  // Use relative URL path for maximum portability across service providers
+  const inscriptionTx = inscriptionResult.tx;
+  const changeUtxo = inscriptionResult.payChange;
+  const vout = findInscriptionOutputIndex(inscriptionTx);
   const urlPath = `${CONTENT_PATH}/${txid}_${vout}`;
 
   return {
@@ -231,59 +279,146 @@ export async function inscribeFile(
       urlPath,
       size: fileSize,
     },
-    changeUtxo: payChange,
+    changeUtxo,
   };
 }
 
 /**
- * Inscribes multiple files in sequence
+ * Helper function to add a UTXO as a transaction input
  */
-export async function inscribeFiles(
-  files: Array<{
-    filePath: string;
-    originalPath: string;
-    contentType: string;
-    content?: string;
-  }>,
-  destinationAddress: string,
+function addUtxoInput(tx: Transaction, utxo: Utxo, paymentKey: PrivateKey): void {
+  const js1SatUtxo = {
+    txid: utxo.txid,
+    vout: utxo.vout,
+    satoshis: utxo.satoshis,
+    script: Utils.toHex(Utils.toArray(utxo.script, 'base64')),
+  };
+  tx.addInput(fromUtxo(js1SatUtxo, new P2PKH().unlock(paymentKey)));
+}
+
+/**
+ * Helper function to build a B script
+ */
+
+function buildBScript(fileBuffer: Buffer, contentType: string): Script {
+  const bscript = new Script();
+  bscript.writeOpCode(OP.OP_FALSE);
+  bscript.writeOpCode(OP.OP_RETURN);
+  bscript.writeBin(Utils.toArray(B_PREFIX, 'utf8'));
+  bscript.writeBin([...fileBuffer]);
+  bscript.writeBin(Utils.toArray(contentType));
+  bscript.writeBin(Utils.toArray('binary', 'utf8'));
+  return bscript;
+}
+
+// ============================================================================
+// Public Functions
+// ============================================================================
+
+export async function uploadBFile(
+  filePath: string,
+  originalPath: string,
+  contentType: string,
   paymentKey: PrivateKey,
   indexer: IndexerService,
+  content?: Buffer,
   satsPerKb?: number,
-  onProgress?: (current: number, total: number, file: string) => void
-): Promise<InscribedFile[]> {
-  const inscriptions: InscribedFile[] = [];
-  let changeUtxo: Utxo | undefined;
+  dryRun?: boolean,
+  paymentUtxo?: Utxo
+): Promise<{ inscription: InscribedFile; changeUtxo?: Utxo }> {
+  const fileBuffer = await loadFileContent(filePath, content);
+  const fileSize = fileBuffer.length;
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-
-    if (onProgress) {
-      onProgress(i + 1, files.length, file.originalPath);
-    }
-
-    const result = await inscribeFile(
-      file.filePath,
-      file.originalPath,
-      file.contentType,
-      destinationAddress,
-      paymentKey,
-      indexer,
-      file.content,
-      satsPerKb,
-      false, // not dry-run
-      changeUtxo
-    );
-
-    inscriptions.push(result.inscription);
-    changeUtxo = result.changeUtxo;
-
-    // Small delay between inscriptions (only if not using change UTXO)
-    if (i < files.length - 1 && !changeUtxo) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+  // DRY RUN MODE - Simulate without broadcasting
+  if (dryRun) {
+    await new Promise((resolve) => setTimeout(resolve, DRY_RUN_DELAY_MS));
+    return createDryRunResult(originalPath, fileSize);
   }
 
-  return inscriptions;
+  // REAL MODE - Actually upload B file on-chain
+  const feeEstimate = estimateFeeAndRequiredSats(fileSize, satsPerKb);
+  const paymentAddress = paymentKey.toAddress().toString();
+
+  // Helper to build a B file transaction from UTXOs
+  const buildBFileTransaction = async (utxosToUse: Utxo[]) => {
+    const tx = new Transaction();
+
+    // Add all UTXOs as inputs
+    utxosToUse.forEach((utxo) => addUtxoInput(tx, utxo, paymentKey));
+    // Add B file output
+    tx.addOutput({
+      satoshis: 0,
+      lockingScript: buildBScript(fileBuffer, contentType),
+    });
+
+    // Add change output
+    tx.addOutput({
+      change: true,
+      lockingScript: new P2PKH().lock(paymentAddress),
+    });
+
+    await tx.fee(new SatoshisPerKilobyte(feeEstimate.feeRate));
+    await tx.sign();
+
+    return tx;
+  };
+
+  // Select UTXOs for transaction
+  let selectedUtxos = await selectUtxosForTransaction({
+    paymentUtxo,
+    requiredSats: feeEstimate.requiredSats,
+    indexer,
+    paymentAddress,
+    feeEstimate,
+  });
+
+  // Build the transaction
+  let bFileTx = await buildBFileTransaction(selectedUtxos);
+
+  // Broadcast with retry and UTXO error recovery
+  const txid = await retryWithBackoff(
+    async () => {
+      try {
+        return await indexer.broadcastTransaction(bFileTx.toHex());
+      } catch (error) {
+        // If UTXO error and we're NOT using a provided paymentUtxo, rebuild transaction
+        const isRecoverableUtxoError = !paymentUtxo && isUtxoNotFoundError(error as Error);
+
+        if (isRecoverableUtxoError) {
+          // Refetch UTXOs and rebuild transaction
+          selectedUtxos = await fetchUtxosFromIndexer(indexer, paymentAddress, feeEstimate);
+          bFileTx = await buildBFileTransaction(selectedUtxos);
+        }
+
+        throw createBroadcastError(originalPath, error, 'B file');
+      }
+    },
+    {
+      maxAttempts: RETRY_MAX_ATTEMPTS,
+      initialDelayMs: RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: RETRY_MAX_DELAY_MS,
+    },
+    shouldRetryError
+  );
+
+  const vout = 0; // B file output is always at index 0
+  const urlPath = `${CONTENT_PATH}/${txid}_${vout}`;
+
+  return {
+    inscription: {
+      originalPath,
+      txid,
+      vout,
+      urlPath,
+      size: fileSize,
+    },
+    changeUtxo: {
+      txid,
+      vout: 1,
+      satoshis: bFileTx.outputs[1].satoshis || 0,
+      script: Utils.toBase64(bFileTx.outputs[1].lockingScript.toBinary()),
+    },
+  };
 }
 
 /**

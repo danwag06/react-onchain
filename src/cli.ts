@@ -1,18 +1,58 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { resolve } from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { input, password, confirm, select } from '@inquirer/prompts';
 import { deployToChain, generateManifest, saveManifestWithHistory } from './orchestrator.js';
 import { getVersionDetails, getVersionInfoAndHistory } from './versioningInscriptionHandler.js';
-import { config as envConfig, DEFAULT_CONFIG } from './config.js';
+import { config as envConfig } from './config.js';
 import type { DeploymentConfig, InscribedFile, DeploymentManifestHistory } from './types.js';
 import { readFile, writeFile } from 'fs/promises';
+import { formatError } from './utils/errors.js';
+import { MANIFEST_FILENAME } from './utils/constants.js';
+import { getManifestLatestVersion } from './utils/helpers.js';
 
 const program = new Command();
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const CLI_CONSTANTS = {
+  DEFAULT_VERSION: '1.0.0',
+  ENV_FILE: '.env',
+  GITIGNORE_FILE: '.gitignore',
+  COMMON_BUILD_DIRS: ['dist', 'build', 'out', '.next/standalone', 'public'],
+
+  // Display formatting
+  FILENAME_MAX_LENGTH: 35,
+  FILENAME_TRUNCATE_SUFFIX: 32,
+  DIVIDER_LENGTH: 70,
+  PROGRESS_BAR_WIDTH: 20,
+
+  // Pagination
+  DEFAULT_VERSION_LIMIT: 10,
+  VERSION_DESC_MAX_LENGTH: 37,
+  VERSION_DESC_TRUNCATE_LENGTH: 34,
+} as const;
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
+interface ManifestData {
+  versioningOriginInscription?: string;
+  buildDir?: string;
+  ordinalContentUrl?: string;
+  deployments?: Array<{ version: string }>;
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /**
  * Format bytes to human-readable string
@@ -26,31 +66,60 @@ function formatBytes(bytes: number): string {
 }
 
 /**
+ * Helper to read and parse manifest data
+ * Returns empty object if manifest doesn't exist or can't be read
+ */
+async function readManifestData(manifestPath: string = MANIFEST_FILENAME): Promise<ManifestData> {
+  const resolvedPath = resolve(manifestPath);
+
+  if (!existsSync(resolvedPath)) {
+    return {};
+  }
+
+  try {
+    const manifestJson = await readFile(resolvedPath, 'utf-8');
+    const parsed = JSON.parse(manifestJson) as DeploymentManifestHistory;
+
+    // Get last deployment info
+    const lastDeployment =
+      parsed.deployments && parsed.deployments.length > 0
+        ? parsed.deployments[parsed.deployments.length - 1]
+        : undefined;
+
+    return {
+      versioningOriginInscription: parsed.originVersioningInscription,
+      buildDir: lastDeployment?.buildDir,
+      ordinalContentUrl: lastDeployment?.ordinalContentUrl,
+      deployments: parsed.deployments,
+    };
+  } catch (error) {
+    console.warn(chalk.yellow('⚠️  Warning: Failed to read manifest:'), formatError(error));
+    return {};
+  }
+}
+
+/**
+ * Increment the patch version (e.g., "1.0.0" → "1.0.1")
+ */
+function incrementPatchVersion(version: string): string {
+  const parts = version.split('.');
+  if (parts.length === 3) {
+    const lastPart = parseInt(parts[2] || '0');
+    parts[2] = String(lastPart + 1);
+    return parts.join('.');
+  }
+  return version;
+}
+
+/**
  * Load content service URL from manifest (if exists) or fallback to config
  * Prioritizes manifest value since it represents what was used during deployment
  */
-async function loadContentUrl(manifestPath: string = 'deployment-manifest.json'): Promise<string> {
-  if (existsSync(manifestPath)) {
-    try {
-      const manifestJson = await readFile(manifestPath, 'utf-8');
-      const manifestData = JSON.parse(manifestJson);
+async function loadContentUrl(manifestPath: string = MANIFEST_FILENAME): Promise<string> {
+  const manifestData = await readManifestData(manifestPath);
 
-      // Check new format (history)
-      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-        const history = manifestData as DeploymentManifestHistory;
-        if (history.deployments.length > 0) {
-          const latestDeployment = history.deployments[history.deployments.length - 1];
-          if (latestDeployment.ordinalContentUrl) {
-            return latestDeployment.ordinalContentUrl;
-          }
-        }
-      } else if ('ordinalContentUrl' in manifestData && manifestData.ordinalContentUrl) {
-        // Old format (single deployment)
-        return manifestData.ordinalContentUrl;
-      }
-    } catch (error) {
-      // Failed to read/parse manifest, fall through to config
-    }
+  if (manifestData.ordinalContentUrl) {
+    return manifestData.ordinalContentUrl;
   }
 
   // Fallback to environment config
@@ -65,17 +134,21 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
   const newFiles = inscriptions.filter((f) => !f.cached);
   const cachedFiles = inscriptions.filter((f) => f.cached);
 
+  const { FILENAME_MAX_LENGTH, FILENAME_TRUNCATE_SUFFIX, DIVIDER_LENGTH } = CLI_CONSTANTS;
+
   // Display new inscriptions
   if (newFiles.length > 0) {
     console.log(chalk.bold.white('📄 New Inscriptions'));
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
 
     newFiles.forEach((file, index) => {
       const fileName =
-        file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
+        file.originalPath.length > FILENAME_MAX_LENGTH
+          ? '...' + file.originalPath.slice(-FILENAME_TRUNCATE_SUFFIX)
+          : file.originalPath;
 
       const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
-      const name = chalk.white(fileName.padEnd(35));
+      const name = chalk.white(fileName.padEnd(FILENAME_MAX_LENGTH));
       const size = chalk.yellow(formatBytes(file.size).padEnd(10));
       const txid = chalk.gray(file.txid.slice(0, 8) + '...');
 
@@ -83,27 +156,29 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
     });
 
     const newFilesSize = newFiles.reduce((sum, f) => sum + f.size, 0);
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log(
       chalk.gray('  SUBTOTAL'.padEnd(39)) +
         chalk.bold.green(formatBytes(newFilesSize).padEnd(11)) +
         chalk.gray(`${newFiles.length} file${newFiles.length !== 1 ? 's' : ''}`)
     );
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log();
   }
 
   // Display cached files
   if (cachedFiles.length > 0) {
     console.log(chalk.bold.cyan('📦 Cached Files (Reused)'));
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
 
     cachedFiles.forEach((file, index) => {
       const fileName =
-        file.originalPath.length > 35 ? '...' + file.originalPath.slice(-32) : file.originalPath;
+        file.originalPath.length > FILENAME_MAX_LENGTH
+          ? '...' + file.originalPath.slice(-FILENAME_TRUNCATE_SUFFIX)
+          : file.originalPath;
 
       const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
-      const name = chalk.cyan(fileName.padEnd(35));
+      const name = chalk.cyan(fileName.padEnd(FILENAME_MAX_LENGTH));
       const size = chalk.gray(formatBytes(file.size).padEnd(10));
       const txid = chalk.gray(file.txid.slice(0, 8) + '...');
 
@@ -111,25 +186,25 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
     });
 
     const cachedFilesSize = cachedFiles.reduce((sum, f) => sum + f.size, 0);
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log(
       chalk.gray('  SUBTOTAL'.padEnd(39)) +
         chalk.cyan(formatBytes(cachedFilesSize).padEnd(11)) +
         chalk.gray(`${cachedFiles.length} file${cachedFiles.length !== 1 ? 's' : ''}`)
     );
-    console.log(chalk.gray('─'.repeat(70)));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log();
   }
 
   // Display total
   console.log(chalk.bold.white('📊 Total'));
-  console.log(chalk.gray('─'.repeat(70)));
+  console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
   console.log(
     chalk.gray('  TOTAL'.padEnd(39)) +
       chalk.bold.green(formatBytes(totalSize).padEnd(11)) +
       chalk.gray(`${inscriptions.length} file${inscriptions.length !== 1 ? 's' : ''}`)
   );
-  console.log(chalk.gray('─'.repeat(70)));
+  console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
   console.log();
 }
 
@@ -137,11 +212,10 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
  * Detect available build directories and prompt user to select one
  */
 async function promptForBuildDir(previousBuildDir?: string): Promise<string> {
-  const commonBuildDirs = ['dist', 'build', 'out', '.next/standalone', 'public'];
   const detectedDirs: string[] = [];
 
   // Check each common directory
-  for (const dir of commonBuildDirs) {
+  for (const dir of CLI_CONSTANTS.COMMON_BUILD_DIRS) {
     const fullPath = resolve(dir);
     if (existsSync(fullPath) && existsSync(resolve(fullPath, 'index.html'))) {
       detectedDirs.push(dir);
@@ -198,96 +272,38 @@ async function promptForBuildDir(previousBuildDir?: string): Promise<string> {
 /**
  * Validate version doesn't already exist in manifest
  */
-function checkVersionInManifest(
+async function checkVersionInManifest(
   version: string,
-  manifestPath: string = 'deployment-manifest.json'
-): { exists: boolean; availableVersions: string[]; suggestion: string } {
-  const availableVersions: string[] = [];
+  manifestPath: string = MANIFEST_FILENAME
+): Promise<{ exists: boolean; availableVersions: string[]; suggestion: string }> {
+  const manifestData = await readManifestData(manifestPath);
 
-  const resolvedPath = resolve(manifestPath);
-  if (existsSync(resolvedPath)) {
-    try {
-      const manifestJson = readFileSync(resolvedPath, 'utf-8');
-      const manifestData = JSON.parse(manifestJson);
+  // Extract all available versions
+  const availableVersions =
+    manifestData.deployments?.map((d) => d.version).filter((v): v is string => !!v) || [];
 
-      let deployments = [];
-      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-        deployments = manifestData.deployments;
-      } else if ('version' in manifestData) {
-        deployments = [manifestData];
-      }
+  // Check if version exists
+  const exists = availableVersions.includes(version);
 
-      // Collect all versions
-      for (const deployment of deployments) {
-        if (deployment.version) {
-          availableVersions.push(deployment.version);
-        }
-      }
+  // Generate suggestion (increment patch version if exists)
+  const suggestion = exists ? incrementPatchVersion(version) : version;
 
-      // Check if version exists
-      const exists = availableVersions.includes(version);
-
-      // Generate suggestion
-      let suggestion = version;
-      if (exists) {
-        const parts = version.split('.');
-        const lastPart = parseInt(parts[parts.length - 1] || '0');
-        parts[parts.length - 1] = String(lastPart + 1);
-        suggestion = parts.join('.');
-      }
-
-      return { exists, availableVersions, suggestion };
-    } catch (error) {
-      // Error reading manifest, assume version doesn't exist
-      console.error(
-        chalk.yellow('⚠️  Warning: Could not read manifest for version validation:'),
-        error
-      );
-    }
-  }
-
-  return { exists: false, availableVersions: [], suggestion: version };
+  return { exists, availableVersions, suggestion };
 }
 
 /**
  * Get the last version from manifest and increment patch version
  */
-function getLastVersionAndSuggestNext(manifestPath: string): string | undefined {
-  const resolvedPath = resolve(manifestPath);
-  if (!existsSync(resolvedPath)) {
+async function getLastVersionAndSuggestNext(manifestPath: string): Promise<string | undefined> {
+  const manifestData = await readManifestData(manifestPath);
+
+  if (!manifestData.deployments || manifestData.deployments.length === 0) {
     return undefined;
   }
 
-  try {
-    const manifestJson = readFileSync(resolvedPath, 'utf-8');
-    const manifestData = JSON.parse(manifestJson);
+  const lastVersion = manifestData.deployments[manifestData.deployments.length - 1].version;
 
-    let lastVersion: string | undefined;
-
-    if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-      // New format - get last deployment version
-      const deployments = manifestData.deployments;
-      if (deployments.length > 0) {
-        lastVersion = deployments[deployments.length - 1].version;
-      }
-    } else if ('version' in manifestData) {
-      // Old format - single deployment
-      lastVersion = manifestData.version;
-    }
-
-    if (lastVersion) {
-      // Increment patch version (e.g., "1.0.0" → "1.0.1")
-      const parts = lastVersion.split('.');
-      if (parts.length === 3) {
-        parts[2] = String(parseInt(parts[2]) + 1);
-        return parts.join('.');
-      }
-    }
-  } catch (error) {
-    // Ignore errors, return undefined
-  }
-
-  return undefined;
+  return lastVersion ? incrementPatchVersion(lastVersion) : undefined;
 }
 
 /**
@@ -295,14 +311,14 @@ function getLastVersionAndSuggestNext(manifestPath: string): string | undefined 
  */
 async function promptForVersion(
   isFirstDeployment: boolean,
-  manifestPath: string = 'deployment-manifest.json'
+  manifestPath: string = MANIFEST_FILENAME
 ): Promise<string> {
   let version: string;
 
   // Get suggested version
   const suggestedVersion = isFirstDeployment
-    ? '1.0.0'
-    : getLastVersionAndSuggestNext(manifestPath) || '1.0.0';
+    ? CLI_CONSTANTS.DEFAULT_VERSION
+    : (await getLastVersionAndSuggestNext(manifestPath)) || CLI_CONSTANTS.DEFAULT_VERSION;
 
   while (true) {
     version = await input({
@@ -316,7 +332,7 @@ async function promptForVersion(
       },
     });
 
-    const check = checkVersionInManifest(version.trim(), manifestPath);
+    const check = await checkVersionInManifest(version.trim(), manifestPath);
 
     if (check.exists) {
       console.log(chalk.red(`\n✗ Version ${version} already exists`));
@@ -345,8 +361,9 @@ async function saveDeploymentEnv(config: {
   ordinalContentUrl: string;
   satsPerKb: number;
 }): Promise<void> {
-  const envPath = resolve('.env');
-  const gitignorePath = resolve('.gitignore');
+  const { ENV_FILE, GITIGNORE_FILE } = CLI_CONSTANTS;
+  const envPath = resolve(ENV_FILE);
+  const gitignorePath = resolve(GITIGNORE_FILE);
   const timestamp = new Date().toISOString().split('T')[0];
 
   // Ensure .gitignore exists and contains .env
@@ -356,18 +373,18 @@ async function saveDeploymentEnv(config: {
     const lines = gitignoreContent.split('\n');
 
     // Check if .env is already in .gitignore
-    const hasEnv = lines.some((line) => line.trim() === '.env');
+    const hasEnv = lines.some((line) => line.trim() === ENV_FILE);
 
     if (!hasEnv) {
       // Add .env to .gitignore
       const updatedContent = gitignoreContent.endsWith('\n')
-        ? gitignoreContent + '.env\n'
-        : gitignoreContent + '\n.env\n';
+        ? gitignoreContent + `${ENV_FILE}\n`
+        : gitignoreContent + `\n${ENV_FILE}\n`;
       await writeFile(gitignorePath, updatedContent, 'utf-8');
     }
   } else {
     // Create .gitignore with .env
-    await writeFile(gitignorePath, '.env\n', 'utf-8');
+    await writeFile(gitignorePath, `${ENV_FILE}\n`, 'utf-8');
   }
 
   const envContent = `# React OnChain Deployment Configuration
@@ -461,38 +478,13 @@ program
       const wasVersionTagProvided = cliArgs.includes('--version-tag');
 
       // Step 1: Load previous manifest to get stored configuration
-      const manifestPath = resolve('deployment-manifest.json');
-      let previousConfig: {
-        buildDir?: string;
-        versioningOriginInscription?: string;
-      } = {};
+      const manifestPath = resolve(MANIFEST_FILENAME);
+      const manifestData = await readManifestData(manifestPath);
 
-      if (existsSync(manifestPath)) {
-        try {
-          const manifestJson = await readFile(manifestPath, 'utf-8');
-          const manifestData = JSON.parse(manifestJson);
-
-          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-            // New format - use top-level originVersioningInscription, last deployment for other config
-            const history = manifestData;
-            if (history.deployments.length > 0) {
-              const lastDeployment = history.deployments[history.deployments.length - 1];
-
-              // Origin versioning inscription from top-level field
-              previousConfig.versioningOriginInscription = history.originVersioningInscription;
-              // Build dir from last deployment
-              previousConfig.buildDir = lastDeployment.buildDir;
-            }
-          } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
-            // Old format - single deployment
-            previousConfig.versioningOriginInscription =
-              manifestData.originVersioningInscription || '';
-            previousConfig.buildDir = manifestData.buildDir;
-          }
-        } catch (error) {
-          // Failed to load manifest - continue without previous config
-        }
-      }
+      const previousConfig = {
+        buildDir: manifestData.buildDir,
+        versioningOriginInscription: manifestData.versioningOriginInscription,
+      };
 
       // Step 2: Build directory - interactive prompt or auto-detect
       const buildDirExplicitlySet = cliArgs.includes('--build-dir') || cliArgs.includes('-b');
@@ -575,7 +567,7 @@ program
           try {
             options.versionTag = await promptForVersion(
               !isSubsequentDeployment,
-              options.manifest || 'deployment-manifest.json'
+              options.manifest || MANIFEST_FILENAME
             );
           } catch (error) {
             console.error(chalk.red('\nVersion input cancelled.'));
@@ -646,14 +638,14 @@ program
 
       // Configuration section
       console.log(chalk.bold.white('📋 Configuration'));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(chalk.gray('  Build directory: ') + chalk.cyan(buildDir));
       console.log(chalk.gray('  Fee rate:        ') + chalk.cyan(`${options.satsPerKb} sats/KB`));
 
       // Display versioning info (always shown)
       console.log(chalk.gray('  Version:         ') + chalk.magenta(options.versionTag!));
       console.log(chalk.gray('  Description:     ') + chalk.white(options.versionDescription!));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
 
       const config: DeploymentConfig = {
@@ -710,13 +702,14 @@ program
           spinner.succeed(chalk.bold.green(`Found ${chalk.white(count)} files to inscribe`));
           console.log();
           console.log(chalk.bold.white('⚡ Inscribing to BSV Blockchain'));
-          console.log(chalk.gray('─'.repeat(70)));
+          console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
           spinner = ora({ text: 'Preparing inscription...', color: 'yellow' }).start();
         },
         onInscriptionStart: (file, current, total) => {
           const percent = Math.round((current / total) * 100);
-          const progressBar =
-            '█'.repeat(Math.floor(percent / 5)) + '░'.repeat(20 - Math.floor(percent / 5));
+          const { PROGRESS_BAR_WIDTH } = CLI_CONSTANTS;
+          const filled = Math.floor(percent / 5);
+          const progressBar = '█'.repeat(filled) + '░'.repeat(PROGRESS_BAR_WIDTH - filled);
           spinner.text =
             chalk.yellow(`[${progressBar}] ${percent}%`) +
             chalk.gray(` Inscribing `) +
@@ -747,7 +740,7 @@ program
         },
         onDeploymentComplete: () => {
           spinner.stop();
-          console.log(chalk.gray('─'.repeat(70)));
+          console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
         },
       });
 
@@ -783,7 +776,7 @@ program
         .reduce((sum, f) => sum + f.size, 0);
 
       console.log(chalk.bold.white('📊 Deployment Stats'));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(
         chalk.gray('  New files:        ') +
           chalk.white(newFileCount) +
@@ -799,12 +792,12 @@ program
         chalk.gray('  Inscription cost: ') + chalk.white(`~${result.totalCost} satoshis`)
       );
       console.log(chalk.gray('  Transactions:     ') + chalk.white(result.txids.length));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
 
       // Display versioning information (always shown)
       console.log(chalk.bold.magenta('📦 Versioning'));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(
         chalk.gray('  Origin:         ') + chalk.yellow(result.versioningOriginInscription)
       );
@@ -835,16 +828,16 @@ program
         );
       }
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
 
       // Show help for additional commands
       console.log(chalk.bold.white('📋 Additional Commands'));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(
         chalk.gray('  Run ') + chalk.cyan('npx react-onchain -h') + chalk.gray(' for more commands')
       );
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
 
       // Save manifest with history
@@ -932,7 +925,7 @@ program
       }
     } catch (error) {
       console.error(chalk.red('\n❌ Deployment failed:\n'));
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      console.error(chalk.red(formatError(error)));
       process.exit(1);
     }
   });
@@ -943,8 +936,12 @@ program
   .description(
     'Show version history for a versioning inscription (auto-reads from manifest if not specified)'
   )
-  .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
-  .option('-l, --limit <number>', 'Limit number of versions to display', '10')
+  .option('-m, --manifest <file>', 'Path to manifest file', MANIFEST_FILENAME)
+  .option(
+    '-l, --limit <number>',
+    'Limit number of versions to display',
+    String(CLI_CONSTANTS.DEFAULT_VERSION_LIMIT)
+  )
   .option('-f, --from-version <version>', 'Start displaying from a specific version')
   .option('-a, --all', 'Show all versions (ignores limit)')
   .action(async (inscriptionOrigin, options) => {
@@ -979,19 +976,7 @@ program
       spinner.succeed(chalk.green(`Found ${history.length} version(s)`));
 
       // Check for sync warning: compare latest on-chain with latest in manifest
-      let manifestLatestVersion: string | null = null;
-      if (existsSync(options.manifest)) {
-        try {
-          const manifestJson = await readFile(options.manifest, 'utf-8');
-          const manifestData = JSON.parse(manifestJson);
-          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-            const latestDeployment = manifestData.deployments[manifestData.deployments.length - 1];
-            manifestLatestVersion = latestDeployment?.version;
-          }
-        } catch (error) {
-          // Ignore manifest read errors
-        }
-      }
+      const manifestLatestVersion = await getManifestLatestVersion(options.manifest);
 
       const onChainLatestVersion = history[0]?.version;
       if (manifestLatestVersion && onChainLatestVersion !== manifestLatestVersion) {
@@ -1028,13 +1013,13 @@ program
       const showingCount = displayHistory.length;
       const totalCount = history.length;
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(
         chalk.gray('Version'.padEnd(15)) +
           chalk.gray('Description'.padEnd(40)) +
           chalk.gray('Status')
       );
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
 
       for (let i = 0; i < displayHistory.length; i++) {
         const { version, description } = displayHistory[i];
@@ -1047,7 +1032,7 @@ program
         );
       }
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
 
       if (showingCount < totalCount) {
         console.log(
@@ -1061,7 +1046,7 @@ program
       console.log(chalk.gray(`Origin: ${info.originOutpoint}\n`));
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to get version history:\n'));
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      console.error(chalk.red(formatError(error)));
       process.exit(1);
     }
   });
@@ -1072,7 +1057,7 @@ program
   .description(
     'Get detailed information about a specific version (auto-reads inscription from manifest if not specified)'
   )
-  .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
+  .option('-m, --manifest <file>', 'Path to manifest file', MANIFEST_FILENAME)
   .action(async (version, inscriptionOrigin, options) => {
     try {
       // If inscription not provided, try to read from manifest
@@ -1109,18 +1094,18 @@ program
 
       spinner.succeed(chalk.green(`Version ${version} found`));
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(chalk.bold('Version:     ') + chalk.cyan(details.version));
       console.log(chalk.bold('Outpoint:    ') + chalk.gray(details.outpoint));
       console.log(
         chalk.bold('URL:         ') + chalk.cyan(`${contentUrl}/content/${details.outpoint}`)
       );
       console.log(chalk.bold('Description: ') + details.description);
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to get version info:\n'));
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      console.error(chalk.red(formatError(error)));
       process.exit(1);
     }
   });
@@ -1131,7 +1116,7 @@ program
   .description(
     'Get information about a versioning inscription (auto-reads from manifest if not specified)'
   )
-  .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
+  .option('-m, --manifest <file>', 'Path to manifest file', MANIFEST_FILENAME)
   .action(async (inscriptionOrigin, options) => {
     try {
       // If inscription not provided, try to read from manifest
@@ -1162,7 +1147,7 @@ program
 
       spinner.succeed(chalk.green('Inscription info loaded'));
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(chalk.bold('Inscription:   ') + chalk.cyan(info.outpoint));
       console.log(chalk.bold('App Name:      ') + info.appName);
       console.log(chalk.bold('Origin:        ') + chalk.gray(info.originOutpoint));
@@ -1171,11 +1156,11 @@ program
         chalk.bold('Latest Version:') +
           ` ${history.length > 0 ? chalk.cyan(history[0].version) : chalk.gray('(none)')}`
       );
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log();
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to get inscription info:\n'));
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      console.error(chalk.red(formatError(error)));
       process.exit(1);
     }
   });
@@ -1184,7 +1169,7 @@ program
 program
   .command('manifest:history')
   .description('Show local deployment history from manifest file')
-  .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
+  .option('-m, --manifest <file>', 'Path to manifest file', MANIFEST_FILENAME)
   .action(async (options) => {
     try {
       const manifestPath = resolve(options.manifest);
@@ -1211,7 +1196,7 @@ program
       spinner.succeed(chalk.green(`Found ${history.totalDeployments} deployment(s)`));
 
       console.log(chalk.bold('\n📚 Deployment History\n'));
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
 
       // Show header
       console.log(
@@ -1221,7 +1206,7 @@ program
           chalk.gray('Files'.padEnd(8)) +
           chalk.gray('Size')
       );
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
 
       // Show each deployment
       history.deployments.forEach((deployment, index) => {
@@ -1244,7 +1229,7 @@ program
         );
       });
 
-      console.log(chalk.gray('─'.repeat(70)));
+      console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
 
       // Show summary
       const totalCost = history.deployments.reduce((sum, d) => sum + d.totalCost, 0);
@@ -1259,7 +1244,7 @@ program
       console.log();
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to read manifest history:\n'));
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      console.error(chalk.red(formatError(error)));
       process.exit(1);
     }
   });

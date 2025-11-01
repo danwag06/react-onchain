@@ -2,6 +2,8 @@ import { readFile } from 'fs/promises';
 import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
 import type { BrowserIndexerConfig } from './services/IndexerService.js';
+import { formatError } from './utils/errors.js';
+import { shouldSkipUrl } from './utils/url.js';
 
 // Script template paths
 const VERSION_REDIRECT_SCRIPT_PATH = join(
@@ -10,6 +12,57 @@ const VERSION_REDIRECT_SCRIPT_PATH = join(
 );
 
 const BASE_PATH_FIX_SCRIPT_PATH = join(import.meta.dirname || __dirname, 'basePathFix.template.js');
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Injects a script into the HTML <head> section
+ * If no <head> tag exists, injects at the beginning
+ */
+async function injectScriptIntoHead(
+  htmlContent: string,
+  scriptPath: string,
+  errorMessage: string,
+  placeholder?: { key: string; value: string }
+): Promise<string> {
+  // Read the script template
+  let scriptContent: string;
+  try {
+    scriptContent = await readFile(scriptPath, 'utf-8');
+  } catch (error) {
+    console.warn(`${errorMessage}:`, formatError(error));
+    return htmlContent;
+  }
+
+  // Replace placeholder if provided
+  if (placeholder) {
+    scriptContent = scriptContent.replace(placeholder.key, placeholder.value);
+  }
+
+  // Inject the script into the <head> section
+  const headMatch = htmlContent.match(/<head[^>]*>/i);
+  if (headMatch) {
+    const headTag = headMatch[0];
+    const insertPosition = headMatch.index! + headTag.length;
+    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
+
+    return (
+      htmlContent.substring(0, insertPosition) +
+      injectedScript +
+      htmlContent.substring(insertPosition)
+    );
+  }
+
+  // No <head> tag found, inject at the beginning
+  const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
+  return injectedScript + htmlContent;
+}
+
+// ============================================================================
+// Public Functions
+// ============================================================================
 
 /**
  * Creates a mapping of original paths to inscription URL paths
@@ -63,7 +116,7 @@ export async function rewriteHtml(
   for (const { regex } of patterns) {
     content = content.replace(regex, (match, before, url, after) => {
       // Skip external URLs and data URIs
-      if (url.startsWith('http') || url.startsWith('//') || url.startsWith('data:')) {
+      if (shouldSkipUrl(url)) {
         return match;
       }
 
@@ -75,7 +128,7 @@ export async function rewriteHtml(
           return `${before}${contentUrl}${after}`;
         }
       } catch (error) {
-        console.warn(`Could not resolve reference ${url} in ${originalPath}`);
+        console.warn(`Could not resolve reference ${url} in ${originalPath}:`, formatError(error));
       }
 
       return match;
@@ -99,7 +152,7 @@ export async function rewriteCss(
   // Match url() references
   content = content.replace(/url\(["']?([^"')]+)["']?\)/gi, (match, url) => {
     // Skip external URLs and data URIs
-    if (url.startsWith('http') || url.startsWith('//') || url.startsWith('data:')) {
+    if (shouldSkipUrl(url)) {
       return match;
     }
 
@@ -111,7 +164,7 @@ export async function rewriteCss(
         return `url("${contentUrl}")`;
       }
     } catch (error) {
-      console.warn(`Could not resolve reference ${url} in ${originalPath}`);
+      console.warn(`Could not resolve reference ${url} in ${originalPath}:`, formatError(error));
     }
 
     return match;
@@ -146,7 +199,7 @@ export async function rewriteJs(
         return `${quote}${contentUrl}${quote}`;
       }
     } catch (error) {
-      console.warn(`Could not resolve reference ${ref} in ${originalPath}`);
+      console.warn(`Could not resolve reference ${ref} in ${originalPath}:`, formatError(error));
     }
 
     return match;
@@ -163,7 +216,7 @@ export async function rewriteJs(
           return match.replace(ref, contentUrl);
         }
       } catch (error) {
-        console.warn(`Could not resolve import ${ref} in ${originalPath}`);
+        console.warn(`Could not resolve import ${ref} in ${originalPath}:`, formatError(error));
       }
     }
     return match;
@@ -181,17 +234,19 @@ export async function rewriteFile(
   originalPath: string,
   contentType: string,
   urlMap: Map<string, string>
-): Promise<string> {
+): Promise<Buffer> {
   if (contentType === 'text/html') {
-    return await rewriteHtml(filePath, baseDir, originalPath, urlMap);
+    const content = await rewriteHtml(filePath, baseDir, originalPath, urlMap);
+    return Buffer.from(content, 'utf-8');
   } else if (contentType === 'text/css') {
-    return await rewriteCss(filePath, baseDir, originalPath, urlMap);
+    const content = await rewriteCss(filePath, baseDir, originalPath, urlMap);
+    return Buffer.from(content, 'utf-8');
   } else if (contentType === 'application/javascript') {
-    return await rewriteJs(filePath, baseDir, originalPath, urlMap);
+    const content = await rewriteJs(filePath, baseDir, originalPath, urlMap);
+    return Buffer.from(content, 'utf-8');
   } else {
     // For other file types, return as-is (binary files, etc.)
-    const buffer = await readFile(filePath);
-    return buffer.toString('utf-8');
+    return await readFile(filePath);
   }
 }
 
@@ -206,36 +261,15 @@ export async function injectVersionScript(
   htmlContent: string,
   versionInscriptionOrigin: string
 ): Promise<string> {
-  // Read the version redirect script template
-  let scriptContent: string;
-  try {
-    scriptContent = await readFile(VERSION_REDIRECT_SCRIPT_PATH, 'utf-8');
-  } catch (error) {
-    console.warn('Could not load version redirect script template:', error);
-    return htmlContent;
-  }
-
-  // Replace placeholder
-  scriptContent = scriptContent.replace('__VERSION_INSCRIPTION_ORIGIN__', versionInscriptionOrigin);
-
-  // Inject the script into the <head> section
-  const headMatch = htmlContent.match(/<head[^>]*>/i);
-  if (headMatch) {
-    const headTag = headMatch[0];
-    const insertPosition = headMatch.index! + headTag.length;
-
-    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
-
-    return (
-      htmlContent.substring(0, insertPosition) +
-      injectedScript +
-      htmlContent.substring(insertPosition)
-    );
-  } else {
-    // No <head> tag found, inject at the beginning
-    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
-    return injectedScript + htmlContent;
-  }
+  return injectScriptIntoHead(
+    htmlContent,
+    VERSION_REDIRECT_SCRIPT_PATH,
+    'Could not load version redirect script template',
+    {
+      key: '__VERSION_INSCRIPTION_ORIGIN__',
+      value: versionInscriptionOrigin,
+    }
+  );
 }
 
 /**
@@ -247,31 +281,9 @@ export async function injectVersionScript(
  * @returns Modified HTML with injected base path fix script
  */
 export async function injectBasePathFix(htmlContent: string): Promise<string> {
-  // Read the base path fix script template
-  let scriptContent: string;
-  try {
-    scriptContent = await readFile(BASE_PATH_FIX_SCRIPT_PATH, 'utf-8');
-  } catch (error) {
-    console.warn('Could not load base path fix script template:', error);
-    return htmlContent;
-  }
-
-  // Inject the script into the <head> section (before any other scripts)
-  const headMatch = htmlContent.match(/<head[^>]*>/i);
-  if (headMatch) {
-    const headTag = headMatch[0];
-    const insertPosition = headMatch.index! + headTag.length;
-
-    const injectedScript = `\n<script>\n${scriptContent}\n</script>\n`;
-
-    return (
-      htmlContent.substring(0, insertPosition) +
-      injectedScript +
-      htmlContent.substring(insertPosition)
-    );
-  } else {
-    // No <head> tag found, inject at the beginning
-    const injectedScript = `<script>\n${scriptContent}\n</script>\n`;
-    return injectedScript + htmlContent;
-  }
+  return injectScriptIntoHead(
+    htmlContent,
+    BASE_PATH_FIX_SCRIPT_PATH,
+    'Could not load base path fix script template'
+  );
 }

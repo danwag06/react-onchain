@@ -5,7 +5,7 @@
 
 export { analyzeBuildDirectory, buildDependencyGraph, getTopologicalOrder } from './analyzer.js';
 export { createUrlMap, rewriteFile, rewriteHtml, rewriteCss, rewriteJs } from './rewriter.js';
-export { inscribeFile, inscribeFiles, estimateInscriptionCost } from './inscriber.js';
+export { inscribeFile, estimateInscriptionCost } from './inscriber.js';
 export { deployToChain, generateManifest, saveManifest } from './orchestrator.js';
 export type { OrchestratorCallbacks } from './orchestrator.js';
 export type {

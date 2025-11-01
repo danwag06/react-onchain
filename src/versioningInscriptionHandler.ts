@@ -6,10 +6,13 @@
  */
 
 import type { PrivateKey } from '@bsv/sdk';
-import { createOrdinals, sendOrdinals } from 'js-1sat-ord';
+import { createOrdinals, sendOrdinals, Utxo } from 'js-1sat-ord';
 import { createIndexer } from './config.js';
-import { retryWithBackoff, shouldRetryError } from './retryUtils.js';
+import { retryWithBackoff, shouldRetryError } from './utils/retry.js';
 import { IndexerService } from './services/IndexerService.js';
+import { formatError } from './utils/errors.js';
+import { getManifestLatestVersion } from './utils/helpers.js';
+import { MANIFEST_FILENAME } from './utils/constants.js';
 
 let _indexer: IndexerService | null = null;
 
@@ -27,6 +30,7 @@ export interface VersioningInscriptionInfo {
   originOutpoint: string;
   appName: string;
   metadata: Record<string, any>;
+  utxo?: Utxo | null;
 }
 
 /**
@@ -99,7 +103,7 @@ export async function deployVersioningInscription(
         const paymentAddress = paymentKey.toAddress().toString();
 
         // Fetch payment UTXOs (filtering for 'pay' type to exclude ordinals)
-        const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined, 'pay');
+        const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined);
 
         if (paymentUtxos.length === 0) {
           throw new Error(
@@ -147,9 +151,7 @@ export async function deployVersioningInscription(
     return result;
   } catch (error) {
     console.error('❌ Failed to deploy versioning inscription:', error);
-    throw new Error(
-      `Versioning inscription deployment failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Versioning inscription deployment failed: ${formatError(error)}`);
   }
 }
 
@@ -183,13 +185,19 @@ export async function updateVersioningInscription(
         // Create indexer
         const indexer = getIndexer();
 
-        // Fetch latest inscription in origin chain
-        const { utxo: latestVersionUtxo } = await indexer.fetchLatestVersionMetadata(
-          versionInscriptionOrigin,
-          true
-        );
+        const { history, info } = await getVersionInfoAndHistory(versionInscriptionOrigin);
 
-        if (!latestVersionUtxo) {
+        // Check for sync warning: compare latest on-chain with latest in manifest
+        const manifestLatestVersion = await getManifestLatestVersion(MANIFEST_FILENAME);
+
+        const onChainLatestVersion = history[0]?.version;
+        if (manifestLatestVersion && onChainLatestVersion !== manifestLatestVersion) {
+          throw new Error(
+            'On-chain versioning data is still syncing. Latest on-chain version differs from manifest. Try again in a few moments.'
+          );
+        }
+
+        if (!info.utxo) {
           throw new Error(
             `Could not find versioning inscription utxo at origin: ${versionInscriptionOrigin}`
           );
@@ -209,8 +217,7 @@ export async function updateVersioningInscription(
           );
         }
 
-        // Fetch payment UTXOs (excluding ordinals)
-        const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined, 'pay');
+        const paymentUtxos = await indexer.listUnspent(paymentAddress);
 
         if (paymentUtxos.length === 0) {
           throw new Error(
@@ -226,14 +233,7 @@ export async function updateVersioningInscription(
         };
 
         const ordData = {
-          ordinals: [
-            {
-              txid: latestVersionUtxo.txid || '',
-              vout: latestVersionUtxo.vout || 0,
-              satoshis: latestVersionUtxo.satoshis || 1,
-              script: latestVersionUtxo.script || '',
-            },
-          ],
+          ordinals: [info.utxo],
           destinations: [
             {
               address: destinationAddress,
@@ -267,9 +267,7 @@ export async function updateVersioningInscription(
     return result;
   } catch (error) {
     console.error('❌ Failed to update versioning inscription:', error);
-    throw new Error(
-      `Versioning inscription update failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Versioning inscription update failed: ${formatError(error)}`);
   }
 }
 
@@ -320,9 +318,7 @@ export async function checkVersionExists(
     }
 
     console.error('Failed to check version existence:', error);
-    throw new Error(
-      `Version existence check failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Version existence check failed: ${formatError(error)}`);
   }
 }
 
@@ -367,9 +363,7 @@ export async function getVersionDetails(
     };
   } catch (error) {
     console.error('Failed to get version details:', error);
-    throw new Error(
-      `Getting version details failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Getting version details failed: ${formatError(error)}`);
   }
 }
 
@@ -398,9 +392,7 @@ export async function getInscriptionInfo(
     };
   } catch (error) {
     console.error('Failed to get inscription info:', error);
-    throw new Error(
-      `Getting inscription info failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Getting inscription info failed: ${formatError(error)}`);
   }
 }
 
@@ -418,7 +410,10 @@ export async function getVersionInfoAndHistory(versionInscriptionOrigin: string)
   try {
     // Fetch metadata once
     const indexer = getIndexer();
-    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+    const { metadata, utxo } = await indexer.fetchLatestVersionMetadata(
+      versionInscriptionOrigin,
+      true
+    );
 
     if (!metadata) {
       throw new Error(`No metadata found for versioning inscription: ${versionInscriptionOrigin}`);
@@ -430,6 +425,7 @@ export async function getVersionInfoAndHistory(versionInscriptionOrigin: string)
       originOutpoint: versionInscriptionOrigin,
       appName: metadata.app || 'react-onchain',
       metadata,
+      utxo,
     };
 
     // Build version history
@@ -464,8 +460,6 @@ export async function getVersionInfoAndHistory(versionInscriptionOrigin: string)
     };
   } catch (error) {
     console.error('Failed to get version info and history:', error);
-    throw new Error(
-      `Getting version info and history failed: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error(`Getting version info and history failed: ${formatError(error)}`);
   }
 }

@@ -1,10 +1,9 @@
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from './analyzer.js';
 import { rewriteFile, injectVersionScript, injectBasePathFix } from './rewriter.js';
-import { inscribeFile, estimateInscriptionCost } from './inscriber.js';
+import { inscribeFile, estimateInscriptionCost, uploadBFile } from './inscriber.js';
 import {
   deployVersioningInscription,
   updateVersioningInscription,
@@ -19,6 +18,175 @@ import type {
   DeploymentManifestHistory,
   InscribedFile,
 } from './types.js';
+import { Utxo } from 'js-1sat-ord';
+import { formatError } from './utils/errors.js';
+import {
+  MANIFEST_FILENAME,
+  VERSIONING_ORIGIN_TYPE,
+  VERSIONING_METADATA_TYPE,
+  CONTENT_PATH_PREFIX,
+  OUTPOINT_SEPARATOR,
+  DEFAULT_SATS_PER_KB,
+  DEFAULT_INSCRIPTION_VOUT,
+  INSCRIPTION_DELAY_MS,
+  MANIFEST_VERSION,
+  MOCK_VERSIONING_TXID,
+} from './utils/constants.js';
+import {
+  extractOutpointFromFile,
+  calculateDependencyHash,
+  suggestNextVersion,
+  isIndexHtmlFile,
+} from './utils/inscription.js';
+
+// ============================================================================
+// Orchestrator-specific Helper Functions
+// ============================================================================
+
+/**
+ * Initializes payment key (random for dry-run, from WIF otherwise)
+ */
+function initializePaymentKey(paymentKey: string, dryRun: boolean): PrivateKey {
+  if (dryRun) {
+    return PrivateKey.fromRandom();
+  }
+  return PrivateKey.fromWif(paymentKey);
+}
+
+/**
+ * Calculates total number of inscriptions for progress tracking
+ */
+function calculateTotalInscriptions(fileCount: number, isFirstDeployment: boolean): number {
+  let total = fileCount;
+  if (isFirstDeployment) total += 1; // Empty versioning inscription
+  total += 1; // Metadata update inscription
+  return total;
+}
+
+// ============================================================================
+// Manifest Helper Functions
+// ============================================================================
+
+/**
+ * Result of loading and parsing manifest data
+ */
+interface ManifestData {
+  existingVersions: string[];
+  previousInscriptions: Map<string, InscribedFile>;
+  versioningOrigin?: string;
+}
+
+/**
+ * Loads manifest file and extracts versions and previous inscriptions
+ * Consolidates duplicate manifest loading logic
+ */
+async function loadManifestData(manifestPath: string): Promise<ManifestData | null> {
+  if (!existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    const manifestJson = await readFile(manifestPath, 'utf-8');
+    const manifestData = JSON.parse(manifestJson);
+
+    const result: ManifestData = {
+      existingVersions: [],
+      previousInscriptions: new Map(),
+    };
+
+    // Handle both old (single deployment) and new (history) format
+    if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+      // New format
+      const history = manifestData as DeploymentManifestHistory;
+
+      // Extract existing versions
+      result.existingVersions = history.deployments
+        .map((d) => d.version)
+        .filter((v): v is string => v !== undefined);
+
+      // Extract versioning origin
+      result.versioningOrigin = history.originVersioningInscription;
+
+      // Build lookup map from most recent deployment only
+      if (history.deployments.length > 0) {
+        const recentDeployment = history.deployments[history.deployments.length - 1];
+        for (const file of recentDeployment.files) {
+          if (file.contentHash) {
+            result.previousInscriptions.set(file.originalPath, file);
+          }
+        }
+      }
+    } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
+      // Old format - single deployment
+      const manifest = manifestData as DeploymentManifest;
+
+      if (manifest.version) {
+        result.existingVersions = [manifest.version];
+      }
+
+      // Load previous inscriptions for cache
+      for (const file of manifest.files) {
+        if (file.contentHash) {
+          result.previousInscriptions.set(file.originalPath, file);
+        }
+      }
+    }
+
+    return result;
+  } catch (error) {
+    // Failed to load manifest - not critical
+    return null;
+  }
+}
+
+/**
+ * Prepares index.html with injected scripts
+ */
+async function prepareIndexHtml(
+  htmlContent: string,
+  versioningOriginInscription: string | undefined,
+  dryRun: boolean
+): Promise<Buffer> {
+  // Inject base path fix script (MUST run before React loads)
+  let processedHtml = await injectBasePathFix(htmlContent);
+
+  if (dryRun) {
+    console.log('📝 Base path fix script injected (dry-run mode)');
+  }
+
+  // Inject version script if inscription origin is known
+  if (versioningOriginInscription) {
+    processedHtml = await injectVersionScript(processedHtml, versioningOriginInscription);
+
+    if (dryRun) {
+      console.log('📝 Version redirect script injected (dry-run mode)');
+    }
+  }
+
+  return Buffer.from(processedHtml, 'utf-8');
+}
+
+/**
+ * Determines if a previous inscription can be reused (cached)
+ */
+function canReuseInscription(
+  filePath: string,
+  fileRef: any, // FileReference type from analyzer
+  previousInscription: InscribedFile | undefined,
+  urlMap: Map<string, string>
+): boolean {
+  // Early rejections
+  if (!previousInscription) return false;
+  if (isIndexHtmlFile(filePath)) return false; // Always re-inscribe index.html
+  if (previousInscription.contentHash !== fileRef.contentHash) return false;
+
+  // No dependencies - can reuse
+  if (fileRef.dependencies.length === 0) return true;
+
+  // Has dependencies - check dependency hash
+  const currentDepHash = calculateDependencyHash(fileRef.dependencies, urlMap);
+  return previousInscription.dependencyHash === currentDepHash;
+}
 
 export interface OrchestratorCallbacks {
   onAnalysisStart?: () => void;
@@ -52,16 +220,8 @@ export async function deployToChain(
   // Get service URLs (use config override or fall back to env/defaults)
   const primaryContentUrl = ordinalContentUrl || envConfig.ordinalContentUrl;
 
-  // Parse payment key (skip in dry-run mode)
-  let paymentPk: PrivateKey;
-  if (dryRun) {
-    // Use a valid dummy key for dry-run mode
-    paymentPk = PrivateKey.fromRandom();
-  } else {
-    paymentPk = PrivateKey.fromWif(paymentKey);
-  }
-
-  // Derive destination address from payment key
+  // Initialize payment key and address
+  const paymentPk = initializePaymentKey(paymentKey, dryRun || false);
   const destinationAddress = paymentPk.toAddress().toString();
 
   // Create IndexerService for blockchain operations
@@ -76,119 +236,39 @@ export async function deployToChain(
     throw new Error(`No files found in build directory: ${buildDir}`);
   }
 
-  // Step 1.5: Setup versioning variables (inscription deployment happens AFTER file inscriptions)
-  // Note: For inscription-based versioning, we always inject the version redirect script.
-  // On FIRST deployments: The script will use the entry point outpoint as the inscription origin.
-  // On SUBSEQUENT deployments: The script will use the existing inscription origin from manifest.
-  // The version redirect script gracefully handles cases where no inscription metadata exists yet.
-  let finalVersioningOriginInscription = versioningOriginInscription; // Note: field name kept for compatibility, but stores inscription origin
+  // Step 1.5: Setup versioning variables
+  let finalVersioningOriginInscription = versioningOriginInscription;
   let changeUtxo: any = undefined; // Track change from previous transaction
 
-  // Step 1.6: Check manifest for duplicate version (LOCAL CHECK - always run)
-  // This prevents deploying the same version multiple times locally, which would waste satoshis on re-inscription
-  const manifestPath = 'deployment-manifest.json';
-  if (existsSync(manifestPath)) {
-    try {
-      const manifestJson = await readFile(manifestPath, 'utf-8');
-      const manifestData = JSON.parse(manifestJson);
+  // Step 1.6-1.8: Load manifest data (consolidates duplicate checks and cache loading)
+  const manifestData = await loadManifestData(MANIFEST_FILENAME);
 
-      let existingVersions: string[] = [];
-
-      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-        // New format
-        const history = manifestData as DeploymentManifestHistory;
-        existingVersions = history.deployments
-          .map((d) => d.version)
-          .filter((v): v is string => v !== undefined);
-      } else if ('version' in manifestData) {
-        // Old format
-        const manifest = manifestData as DeploymentManifest;
-        if (manifest.version) {
-          existingVersions = [manifest.version];
-        }
-      }
-
-      if (existingVersions.includes(version)) {
-        const lastNumberInVersion = version.split('.').pop();
-        const newVersion = `${version.split('.').slice(0, -1).join('.')}.${Number(lastNumberInVersion) + 1}`;
-        throw new Error(
-          `Version "${version}" already exists in local manifest.\n` +
-            `  Please use a different version tag (e.g., "${newVersion}" or increment the version number).\n` +
-            `  Existing versions: ${existingVersions.join(', ')}`
-        );
-      }
-    } catch (error) {
-      // If error is our duplicate version error, re-throw it
-      if (error instanceof Error && error.message.includes('already exists')) {
-        throw error;
-      }
-      // Otherwise, continue (failed to read manifest - not critical)
-    }
+  // Check for duplicate version (LOCAL CHECK)
+  if (manifestData && manifestData.existingVersions.includes(version)) {
+    const newVersion = suggestNextVersion(version);
+    throw new Error(
+      `Version "${version}" already exists in local manifest.\n` +
+        `  Please use a different version tag (e.g., "${newVersion}" or increment the version number).\n` +
+        `  Existing versions: ${manifestData.existingVersions.join(', ')}`
+    );
   }
 
-  // Step 1.7: Validate version doesn't exist in inscription metadata (ON-CHAIN CHECK - subsequent deployments only)
-  // This prevents wasting satoshis on inscription when the version already exists in the metadata.
-  // Skip this check for:
-  //   - First deployments (versioning origin inscription is undefined)
-  //   - Dry-run mode (don't hit the network)
+  // Validate version doesn't exist on-chain (SUBSEQUENT DEPLOYMENTS ONLY)
   if (versioningOriginInscription && !dryRun && VERSIONING_ENABLED) {
     try {
       await checkVersionExists(versioningOriginInscription, version);
     } catch (error) {
-      // Version exists or other error - fail fast before inscribing anything
-      throw new Error(
-        `Cannot proceed with deployment: ${error instanceof Error ? error.message : String(error)}`
-      );
+      throw new Error(`Cannot proceed with deployment: ${formatError(error)}`);
     }
   }
 
-  // Step 1.8: Load previous deployment manifest for cache
-  // This allows us to reuse inscriptions for files that haven't changed
-  // Note: manifestPath already declared above in Step 1.6
-  const previousInscriptions = new Map<string, InscribedFile>();
-
-  if (existsSync(manifestPath)) {
-    try {
-      const manifestJson = await readFile(manifestPath, 'utf-8');
-      const manifestData = JSON.parse(manifestJson);
-
-      // Handle both old (single deployment) and new (history) format
-      let deploymentsToProcess: DeploymentManifest[] = [];
-
-      if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
-        // New format - use most recent deployment
-        const history = manifestData as DeploymentManifestHistory;
-        if (history.deployments.length > 0) {
-          deploymentsToProcess = [history.deployments[history.deployments.length - 1]];
-        }
-      } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
-        // Old format - single deployment
-        deploymentsToProcess = [manifestData as DeploymentManifest];
-      }
-
-      // Build lookup map from most recent deployment
-      for (const deployment of deploymentsToProcess) {
-        for (const file of deployment.files) {
-          // Only cache if file has contentHash (backward compatibility)
-          if (file.contentHash) {
-            previousInscriptions.set(file.originalPath, file);
-          }
-        }
-      }
-    } catch (error) {
-      // Failed to load previous manifest - continue without cache
-      console.warn('⚠️  Warning: Could not load previous manifest for cache');
-    }
-  }
+  // Extract previous inscriptions for cache
+  const previousInscriptions =
+    manifestData?.previousInscriptions || new Map<string, InscribedFile>();
 
   // Calculate total inscriptions for progress tracking
-  let totalInscriptions = order.length;
-  // Add empty versioning inscription for first deployment
-  if (!versioningOriginInscription) {
-    totalInscriptions += 1;
-  }
-  // Add metadata update inscription (always added)
-  totalInscriptions += 1;
+  const isFirstDeployment = !versioningOriginInscription;
+  const totalInscriptions = calculateTotalInscriptions(order.length, isFirstDeployment);
 
   let currentInscriptionIndex = 0;
 
@@ -202,7 +282,7 @@ export async function deployToChain(
   if (!versioningOriginInscription && !dryRun && VERSIONING_ENABLED) {
     currentInscriptionIndex++;
     callbacks?.onInscriptionStart?.(
-      'versioning-origin',
+      VERSIONING_ORIGIN_TYPE,
       currentInscriptionIndex,
       totalInscriptions
     );
@@ -213,23 +293,19 @@ export async function deployToChain(
         destinationAddress,
         satsPerKb
       );
-      // Add versioning origin txid immediately (maintains chronological order)
-      const originTxid = finalVersioningOriginInscription.split('_')[0];
+      const originTxid = finalVersioningOriginInscription.split(OUTPOINT_SEPARATOR)[0];
       txids.add(originTxid);
 
       callbacks?.onInscriptionComplete?.(
-        'versioning-origin',
-        `/content/${finalVersioningOriginInscription}`
+        VERSIONING_ORIGIN_TYPE,
+        `${CONTENT_PATH_PREFIX}${finalVersioningOriginInscription}`
       );
     } catch (error) {
-      throw new Error(
-        `Failed to deploy versioning inscription: ${error instanceof Error ? error.message : String(error)}`
-      );
+      throw new Error(`Failed to deploy versioning inscription: ${formatError(error)}`);
     }
   } else if (dryRun && !versioningOriginInscription) {
     // DRY RUN MODE - Create mock versioning inscription origin
-    const mockInscriptionTxid = 'c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0';
-    finalVersioningOriginInscription = `${mockInscriptionTxid}_0`;
+    finalVersioningOriginInscription = `${MOCK_VERSIONING_TXID}${OUTPOINT_SEPARATOR}${DEFAULT_INSCRIPTION_VOUT}`;
   }
 
   // Step 2: Process files in topological order
@@ -253,40 +329,15 @@ export async function deployToChain(
 
     // Step 2.1: Check if we can reuse a previous inscription (cache hit)
     const previousInscription = previousInscriptions.get(filePath);
-    const isIndexHtml = filePath === 'index.html' || filePath.endsWith('/index.html');
-
-    // Always re-inscribe index.html (dynamic script injection)
-    let canReuseInscription = false;
-
-    if (previousInscription && !isIndexHtml) {
-      // Content hash matches - check dependency hash
-      if (previousInscription.contentHash === fileRef.contentHash) {
-        const hasDependencies = fileRef.dependencies.length > 0;
-
-        if (!hasDependencies) {
-          // No dependencies - can safely reuse
-          canReuseInscription = true;
-        } else {
-          // Has dependencies - compute dependency hash
-          const dependencyUrls = fileRef.dependencies
-            .map((dep) => urlMap.get(dep))
-            .filter((url): url is string => url !== undefined)
-            .sort();
-
-          const dependencyHash = createHash('sha256')
-            .update(dependencyUrls.join('|'))
-            .digest('hex');
-
-          // Check if dependency hash matches
-          if (previousInscription.dependencyHash === dependencyHash) {
-            canReuseInscription = true;
-          }
-        }
-      }
-    }
+    const shouldReuseInscription = canReuseInscription(
+      filePath,
+      fileRef,
+      previousInscription,
+      urlMap
+    );
 
     // If we can reuse, skip inscription and add to urlMap
-    if (canReuseInscription && previousInscription) {
+    if (shouldReuseInscription && previousInscription) {
       inscriptions.push({
         ...previousInscription,
         // Keep original contentHash and dependencyHash
@@ -305,7 +356,7 @@ export async function deployToChain(
 
     // Check if this file has dependencies that have been inscribed
     const hasDependencies = fileRef.dependencies.length > 0;
-    let content: string | undefined;
+    let content: Buffer | undefined;
 
     if (hasDependencies) {
       // Rewrite the file content to use ordfs URLs
@@ -313,60 +364,53 @@ export async function deployToChain(
     }
 
     // Inject scripts into index.html if needed
-    // Note: isIndexHtml already declared above in cache check section
-    if (isIndexHtml) {
-      // Read the HTML content if not already read
-      if (!content) {
-        content = await readFile(absolutePath, 'utf-8');
-      }
+    let result: { inscription: InscribedFile; changeUtxo?: Utxo } | undefined;
+    const isHtmlFile = isIndexHtmlFile(filePath);
 
-      // Inject base path fix script (MUST run before React loads)
-      content = await injectBasePathFix(content);
+    if (isHtmlFile) {
+      // Read the HTML content if not already read, or convert Buffer to string
+      const htmlContent = content
+        ? content.toString('utf-8')
+        : await readFile(absolutePath, 'utf-8');
 
-      if (dryRun) {
-        console.log('📝 Base path fix script injected (dry-run mode)');
-      }
+      // Inject base path fix and version scripts
+      content = await prepareIndexHtml(
+        htmlContent,
+        finalVersioningOriginInscription,
+        dryRun || false
+      );
 
-      // Inject version script if inscription origin is known
-      // The finalVersioningOriginInscription is now deployed BEFORE HTML inscription (Step 1.9),
-      // so it's always available for script injection on both first and subsequent deployments
-      if (finalVersioningOriginInscription) {
-        content = await injectVersionScript(
-          content,
-          finalVersioningOriginInscription // This is the inscription origin outpoint
-        );
-
-        if (dryRun) {
-          console.log('📝 Version redirect script injected (dry-run mode)');
-        }
-      }
+      // Inscribe the file
+      result = await inscribeFile(
+        absolutePath,
+        filePath,
+        fileRef.contentType,
+        destinationAddress,
+        paymentPk,
+        indexer,
+        content,
+        satsPerKb,
+        dryRun,
+        changeUtxo
+      );
+    } else {
+      result = await uploadBFile(
+        absolutePath,
+        filePath,
+        fileRef.contentType,
+        paymentPk,
+        indexer,
+        content,
+        satsPerKb,
+        dryRun,
+        changeUtxo
+      );
     }
-
-    // Inscribe the file (or simulate in dry-run mode)
-    // Pass the change UTXO from the previous transaction (if any)
-    const result = await inscribeFile(
-      absolutePath,
-      filePath,
-      fileRef.contentType,
-      destinationAddress,
-      paymentPk,
-      indexer,
-      content,
-      satsPerKb,
-      dryRun,
-      changeUtxo
-    );
 
     // Compute dependency hash for files with dependencies
-    let dependencyHash: string | undefined;
-    if (hasDependencies) {
-      const dependencyUrls = fileRef.dependencies
-        .map((dep) => urlMap.get(dep))
-        .filter((url): url is string => url !== undefined)
-        .sort();
-
-      dependencyHash = createHash('sha256').update(dependencyUrls.join('|')).digest('hex');
-    }
+    const dependencyHash = hasDependencies
+      ? calculateDependencyHash(fileRef.dependencies, urlMap)
+      : undefined;
 
     // Add hash fields to inscription
     const inscribedFile: InscribedFile = {
@@ -388,18 +432,16 @@ export async function deployToChain(
     callbacks?.onInscriptionComplete?.(filePath, result.inscription.urlPath);
 
     // Calculate cost using proper estimation (only for newly inscribed files, not cached)
-    totalCost += estimateInscriptionCost(result.inscription.size, satsPerKb || 50);
+    totalCost += estimateInscriptionCost(result.inscription.size, satsPerKb || DEFAULT_SATS_PER_KB);
 
     // Small delay between inscriptions (only needed if NOT using change UTXO)
     if (i < order.length - 1 && !changeUtxo) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, INSCRIPTION_DELAY_MS));
     }
   }
 
   // Find the entry point (index.html)
-  const entryPoint = inscriptions.find(
-    (i) => i.originalPath === 'index.html' || i.originalPath.endsWith('/index.html')
-  );
+  const entryPoint = inscriptions.find((i) => isIndexHtmlFile(i.originalPath));
 
   if (!entryPoint) {
     throw new Error('No index.html found in build directory');
@@ -423,43 +465,38 @@ export async function deployToChain(
       // PATH 1: FIRST DEPLOYMENT - Update the empty inscription we deployed in Step 1.9
       if (dryRun) {
         // DRY RUN MODE - Mock the update
-        latestVersioningInscription = `${finalVersioningOriginInscription.split('_')[0]}_1`; // Mock spending creates new outpoint
+        latestVersioningInscription = `${finalVersioningOriginInscription.split(OUTPOINT_SEPARATOR)[0]}${OUTPOINT_SEPARATOR}1`;
       } else if (VERSIONING_ENABLED) {
         currentInscriptionIndex++;
         callbacks?.onInscriptionStart?.(
-          'versioning-metadata',
+          VERSIONING_METADATA_TYPE,
           currentInscriptionIndex,
           totalInscriptions
         );
         try {
-          const entryPointOutpoint =
-            entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout;
+          const entryPointOutpoint = extractOutpointFromFile(entryPoint);
 
           latestVersioningInscription = await updateVersioningInscription(
-            finalVersioningOriginInscription, // Spend the empty inscription we created
+            finalVersioningOriginInscription,
             paymentPk,
-            paymentPk, // same key for ordPk
+            paymentPk,
             version,
             entryPointOutpoint,
             versionDescription || `Version ${version}`,
             destinationAddress,
             satsPerKb
           );
-          // Add versioning metadata txid immediately (maintains chronological order)
-          const metadataTxid = latestVersioningInscription.split('_')[0];
+          const metadataTxid = latestVersioningInscription.split(OUTPOINT_SEPARATOR)[0];
           txids.add(metadataTxid);
 
           callbacks?.onInscriptionComplete?.(
-            'versioning-metadata',
-            `/content/${latestVersioningInscription}`
+            VERSIONING_METADATA_TYPE,
+            `${CONTENT_PATH_PREFIX}${latestVersioningInscription}`
           );
         } catch (error) {
-          // Inscription update failed, but app inscription succeeded
-          console.warn(
-            '⚠️  Warning: Failed to update versioning inscription with version metadata.'
-          );
-          console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
-          latestVersioningInscription = undefined;
+          console.error('❌ Failed to update versioning inscription with version metadata.');
+          console.error(`   Error: ${formatError(error)}`);
+          throw error; // Fail deployment - don't swallow the error
         }
       }
     } else {
@@ -467,41 +504,38 @@ export async function deployToChain(
       if (!dryRun && VERSIONING_ENABLED) {
         currentInscriptionIndex++;
         callbacks?.onInscriptionStart?.(
-          'versioning-metadata',
+          VERSIONING_METADATA_TYPE,
           currentInscriptionIndex,
           totalInscriptions
         );
         try {
           latestVersioningInscription = await updateVersioningInscription(
-            versioningOriginInscription, // origin outpoint of versioning inscription chain
+            versioningOriginInscription,
             paymentPk,
-            paymentPk, // same key for ordPk
+            paymentPk,
             version,
-            entryPoint.urlPath.split('/').pop() || entryPoint.txid + '_' + entryPoint.vout,
+            extractOutpointFromFile(entryPoint),
             versionDescription || `Version ${version}`,
             destinationAddress,
             satsPerKb
           );
-          // Add versioning metadata txid immediately (maintains chronological order)
-          const metadataTxid = latestVersioningInscription.split('_')[0];
+          const metadataTxid = latestVersioningInscription.split(OUTPOINT_SEPARATOR)[0];
           txids.add(metadataTxid);
 
           callbacks?.onInscriptionComplete?.(
-            'versioning-metadata',
-            `/content/${latestVersioningInscription}`
+            VERSIONING_METADATA_TYPE,
+            `${CONTENT_PATH_PREFIX}${latestVersioningInscription}`
           );
         } catch (error) {
-          // Inscription update failed, but app inscription succeeded
-          console.warn(
-            '⚠️  Warning: Failed to update versioning inscription. App is deployed but version tracking failed.'
-          );
-          console.warn(`   Error: ${error instanceof Error ? error.message : String(error)}`);
-          console.warn(
+          console.error('❌ Failed to update versioning inscription. Deployment aborted.');
+          console.error(`   Error: ${formatError(error)}`);
+          console.error(
             `   This likely means the payment key does not control the versioning inscription.`
           );
-          console.warn(`   Original inscription sent to: ${destinationAddress}`);
-          console.warn(`   Current payment key controls: ${paymentPk.toAddress().toString()}`);
-          console.warn(`   Solution: Use the same payment key for all deployments.`);
+          console.error(`   Original inscription sent to: ${destinationAddress}`);
+          console.error(`   Current payment key controls: ${paymentPk.toAddress().toString()}`);
+          console.error(`   Solution: Use the same payment key for all deployments.`);
+          throw error; // Fail deployment - don't swallow the error
         }
       }
     }
@@ -613,7 +647,7 @@ export async function saveManifestWithHistory(
         const { originVersioningInscription: _, ...cleanedOldManifest } = oldManifest as any;
 
         history = {
-          manifestVersion: '1.0.0',
+          manifestVersion: MANIFEST_VERSION,
           originVersioningInscription: originVersioningInscription,
           totalDeployments: 2, // Old deployment + new deployment
           deployments: [cleanedOldManifest, manifest],
@@ -648,7 +682,7 @@ function createNewHistory(
   originVersioningInscription: string
 ): DeploymentManifestHistory {
   return {
-    manifestVersion: '1.0.0',
+    manifestVersion: MANIFEST_VERSION,
     originVersioningInscription: originVersioningInscription,
     totalDeployments: 1,
     deployments: [manifest],

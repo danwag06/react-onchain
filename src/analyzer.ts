@@ -2,6 +2,8 @@ import { readdir, readFile } from 'fs/promises';
 import { join, extname, relative, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { FileReference, DependencyNode, CONTENT_TYPES } from './types.js';
+import { formatError } from './utils/errors.js';
+import { shouldSkipUrl } from './utils/url.js';
 
 const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
   '.html': 'text/html',
@@ -69,7 +71,7 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
     while ((match = pattern.exec(content)) !== null) {
       const ref = match[1];
       // Skip external URLs and data URIs
-      if (!ref.startsWith('http') && !ref.startsWith('//') && !ref.startsWith('data:')) {
+      if (!shouldSkipUrl(ref)) {
         // Resolve relative to the HTML file
         const resolvedPath = ref.startsWith('/')
           ? join(baseDir, ref.substring(1))
@@ -158,17 +160,22 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
  * Analyzes a file and extracts its dependencies
  */
 async function analyzeFile(filePath: string, baseDir: string): Promise<FileReference> {
-  const content = await readFile(filePath, 'utf-8');
+  // Read file as Buffer (works for both text and binary files)
+  const contentBuffer = await readFile(filePath);
   const ext = extname(filePath).toLowerCase();
   const relativePath = relative(baseDir, filePath);
 
   let dependencies: string[] = [];
 
+  // Only extract dependencies from text files that could have them
   if (ext === '.html' || ext === '.htm') {
+    const content = contentBuffer.toString('utf-8');
     dependencies = extractHtmlReferences(content, baseDir, filePath);
   } else if (ext === '.css') {
+    const content = contentBuffer.toString('utf-8');
     dependencies = extractCssReferences(content, baseDir, filePath);
   } else if (ext === '.js' || ext === '.mjs') {
+    const content = contentBuffer.toString('utf-8');
     dependencies = extractJsReferences(content, baseDir, filePath);
   }
 
@@ -181,8 +188,8 @@ async function analyzeFile(filePath: string, baseDir: string): Promise<FileRefer
     }
   });
 
-  // Compute SHA256 hash of original content (before any rewriting)
-  const contentHash = createHash('sha256').update(content).digest('hex');
+  // Compute SHA256 hash of original content buffer (before any rewriting)
+  const contentHash = createHash('sha256').update(contentBuffer).digest('hex');
 
   return {
     originalPath: relativePath,
@@ -277,7 +284,7 @@ export async function analyzeBuildDirectory(buildDir: string): Promise<{
       const ref = await analyzeFile(file, buildDir);
       fileReferences.push(ref);
     } catch (error) {
-      console.warn(`Warning: Could not analyze ${file}:`, error);
+      console.warn(`Warning: Could not analyze ${file}:`, formatError(error));
     }
   }
 

@@ -2,6 +2,8 @@
  * Retry utility with exponential backoff
  */
 
+import { formatError } from './errors.js';
+
 export interface RetryOptions {
   maxAttempts?: number;
   initialDelayMs?: number;
@@ -57,7 +59,7 @@ export async function retryWithBackoff<T>(
       }
 
       // Log retry attempt
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = formatError(error);
       console.log(`⚠️  Attempt ${attempt} failed: ${errorMsg}`);
       console.log(`   Retrying in ${delay}ms... (${attempt}/${opts.maxAttempts})`);
 
@@ -77,7 +79,7 @@ export async function retryWithBackoff<T>(
  * Check if an error is related to UTXO not being found
  */
 export function isUtxoNotFoundError(error: any): boolean {
-  const errorMsg = error instanceof Error ? error.message : String(error);
+  const errorMsg = formatError(error);
   const lowerMsg = errorMsg.toLowerCase();
 
   return (
@@ -93,7 +95,7 @@ export function isUtxoNotFoundError(error: any): boolean {
  * Determine if an error should trigger a retry
  */
 export function shouldRetryError(error: any, attempt: number): boolean {
-  const errorMsg = error instanceof Error ? error.message : String(error);
+  const errorMsg = formatError(error);
   const lowerMsg = errorMsg.toLowerCase();
 
   // NEVER retry double-spend or already spent errors
