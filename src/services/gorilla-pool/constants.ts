@@ -1,5 +1,5 @@
 export const GORILLA_POOL_INDEXER_URL = 'https://ordinals.1sat.app';
-export const GORILLA_POOL_CONTENT_URL = 'https://go-ordfs-server-production.up.railway.app';
+export const GORILLA_POOL_CONTENT_URL = 'https://app.reactonchain.com';
 
 /**
  * Standard content path used across all BSV ordinals services

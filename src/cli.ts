@@ -477,6 +477,37 @@ program
       const wasPaymentKeyProvided = cliArgs.includes('--payment-key') || cliArgs.includes('-p');
       const wasVersionTagProvided = cliArgs.includes('--version-tag');
 
+      // Step 0.5: Build reminder prompt (only in interactive mode)
+      if (!options.dryRun && !wasPaymentKeyProvided && !wasVersionTagProvided) {
+        console.log();
+        console.log(
+          chalk.yellow('⚠️  Before deploying, make sure you have built your project!')
+        );
+        console.log(
+          chalk.gray('   Run your build command (e.g., ') +
+            chalk.cyan('npm run build') +
+            chalk.gray(') before proceeding.')
+        );
+        console.log();
+
+        try {
+          const hasBuilt = await confirm({
+            message: 'Have you built your project and are ready to deploy?',
+            default: false,
+          });
+
+          if (!hasBuilt) {
+            console.log(chalk.yellow('\n✋ Please build your project first, then run deploy again.\n'));
+            process.exit(0);
+          }
+
+          console.log();
+        } catch (error) {
+          console.log(chalk.yellow('\n✋ Deployment cancelled.\n'));
+          process.exit(0);
+        }
+      }
+
       // Step 1: Load previous manifest to get stored configuration
       const manifestPath = resolve(MANIFEST_FILENAME);
       const manifestData = await readManifestData(manifestPath);
