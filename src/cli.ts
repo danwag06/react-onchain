@@ -455,8 +455,10 @@ program
   .action(async (options) => {
     try {
       // Step 0: Capture which flags were explicitly provided via CLI (before interactive prompts)
-      const wasPaymentKeyProvided = options.paymentKey !== undefined;
-      const wasVersionTagProvided = options.versionTag !== undefined;
+      // Check process.argv directly since commander sets defaults from envConfig
+      const cliArgs = process.argv.join(' ');
+      const wasPaymentKeyProvided = cliArgs.includes('--payment-key') || cliArgs.includes('-p');
+      const wasVersionTagProvided = cliArgs.includes('--version-tag');
 
       // Step 1: Load previous manifest to get stored configuration
       const manifestPath = resolve('deployment-manifest.json');
@@ -493,7 +495,7 @@ program
       }
 
       // Step 2: Build directory - interactive prompt or auto-detect
-      const buildDirExplicitlySet = options.buildDir !== DEFAULT_CONFIG.buildDir;
+      const buildDirExplicitlySet = cliArgs.includes('--build-dir') || cliArgs.includes('-b');
       const isSubsequentDeployment = !!previousConfig.versioningOriginInscription;
 
       if (!buildDirExplicitlySet) {
@@ -651,18 +653,6 @@ program
       // Display versioning info (always shown)
       console.log(chalk.gray('  Version:         ') + chalk.magenta(options.versionTag!));
       console.log(chalk.gray('  Description:     ') + chalk.white(options.versionDescription!));
-      if (options.versioningOriginInscription) {
-        console.log(
-          chalk.gray('  Origin Inscription:        ') +
-            chalk.yellow(options.versioningOriginInscription)
-        );
-      } else {
-        console.log(
-          chalk.gray('  App name:        ') +
-            chalk.green(options.appName!) +
-            chalk.gray(' (new versioning inscription)')
-        );
-      }
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
 
@@ -841,27 +831,18 @@ program
         console.log(chalk.gray('  Version redirect: ') + chalk.green('✓ Enabled'));
         console.log(
           chalk.gray('  Version access:   ') +
-            chalk.cyan(`${result.ordinalContentUrl + result.entryPointUrl}?version=<VERSION>`)
+            chalk.cyan(`${result.entryPointUrl}?version=<VERSION>`)
         );
       }
 
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
 
-      // Show available query commands
-      console.log(chalk.bold.white('📋 Available Queries'));
+      // Show help for additional commands
+      console.log(chalk.bold.white('📋 Additional Commands'));
       console.log(chalk.gray('─'.repeat(70)));
       console.log(
-        chalk.gray('  • Version history:   ') +
-          chalk.cyan(`npx react-onchain version:history <ORIGIN>`)
-      );
-      console.log(
-        chalk.gray('  • Version summary:   ') +
-          chalk.cyan(`npx react-onchain version:summary <ORIGIN>`)
-      );
-      console.log(
-        chalk.gray('  • Version details:   ') +
-          chalk.cyan(`npx react-onchain version:info <ORIGIN> <VERSION>`)
+        chalk.gray('  Run ') + chalk.cyan('npx react-onchain -h') + chalk.gray(' for more commands')
       );
       console.log(chalk.gray('─'.repeat(70)));
       console.log();
@@ -936,7 +917,7 @@ program
         );
         console.log(
           chalk.green('║') +
-            chalk.gray('  Note: It may take ~10 minutes for full confirmation           ') +
+            chalk.gray('  Note: May take a few moments to propagate across the network ') +
             chalk.green('║')
         );
         console.log(

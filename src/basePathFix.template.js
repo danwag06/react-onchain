@@ -1,21 +1,21 @@
 /**
  * React Router Base Path Setup for react-onchain
  *
- * This script detects ordfs deployment paths and sets up the environment
+ * This script detects content provider deployment paths and sets up the environment
  * for React Router's BrowserRouter to work correctly.
  *
  * How it works:
- * 1. Detects ordfs deployment path (/content/{txid}_{vout})
+ * 1. Detects content provider deployment path (/content/{txid}_{vout})
  * 2. Injects HTML <base> tag for automatic URL resolution
  * 3. Sets window.__REACT_ONCHAIN_BASE__ for React Router
  *
  * For React Router apps, add this ONE LINE to your Router:
  *   <Router basename={window.__REACT_ONCHAIN_BASE__ || '/'}>
  *
- * This enables your app to work on ordfs deployments AND locally with zero config changes!
+ * This enables your app to work on on-chain deployments AND locally with zero config changes!
  *
  * Handles three scenarios:
- * 1. ordfs deployment: /content/{txid}_{vout} → Sets up base path
+ * 1. Content provider (e.g., ordfs.network): /content/{txid}_{vout} → Sets up base path
  * 2. Custom domain: / → No changes needed
  * 3. Local development: localhost → Falls back to '/'
  */
@@ -25,18 +25,18 @@
   try {
     const currentPath = window.location.pathname;
 
-    // Match ordfs content path pattern: /content/{txid}_{vout}
+    // Match content provider path pattern: /content/{txid}_{vout}
     // txid: 64 hex characters, vout: one or more digits
     const contentPathMatch = currentPath.match(/^\/content\/[a-f0-9]{64}_\d+/);
 
     if (!contentPathMatch) {
-      // Not on ordfs, assume root path (custom domain or local dev)
+      // Not on a content provider path, assume root path (custom domain or local dev)
       console.log('[react-onchain] Running at root path (custom domain or local)');
       return;
     }
 
     const basePath = contentPathMatch[0];
-    console.log('[react-onchain] ordfs deployment detected, base path:', basePath);
+    console.log('[react-onchain] Content provider deployment detected, base path:', basePath);
 
     // Set base path immediately as fallback
     // If versionRedirect.template.js is present, it will update this after version resolution

@@ -81,9 +81,9 @@ function App() {
 }
 ```
 
-**That's it!** This single line makes your React Router app work on ordfs deployments AND locally with zero configuration.
+**That's it!** This single line makes your React Router app work with on-chain deployments AND locally with zero configuration.
 
-- On ordfs: `window.__REACT_ONCHAIN_BASE__` = `/content/{txid}_{vout}`
+- When deployed: `window.__REACT_ONCHAIN_BASE__` = `/content/{txid}_{vout}` (for content providers like ordfs.network)
 - Locally: Falls back to `'/'`
 - On custom domains: Automatically uses `'/'`
 
@@ -124,7 +124,7 @@ The destination address is automatically derived from your payment key.
 
 ### 4. Visit your app
 
-The CLI will output the entry point URL:
+The CLI will output the entry point URL. For example, using ordfs.network as a content provider:
 
 ```
 https://ordfs.network/content/<txid>_<vout>
@@ -154,13 +154,13 @@ All configuration is automatically managed for you!
 npx react-onchain deploy
 
 # Query version history (on-chain)
-npx react-onchain version:history <versioningOriginInscription>
+npx react-onchain version:history [versioningOriginInscription]
 
 # Get version details (on-chain)
-npx react-onchain version:info <versioningOriginInscription> <version>
+npx react-onchain version:info <version> [versioningOriginInscription]
 
 # Get inscription info (on-chain)
-npx react-onchain version:summary <versioningOriginInscription>
+npx react-onchain version:summary [versioningOriginInscription]
 
 # View deployment history (local)
 npx react-onchain manifest:history
@@ -312,7 +312,7 @@ After successful deployment, you'll see detailed information about inscribed fil
   Version redirect:   ✓ Enabled
 ──────────────────────────────────────────────────────────────────────
 
-✨ Entry Point
+✨ Entry Point (example using ordfs.network)
 https://ordfs.network/content/f16f3780...
 
 📁 Files Saved
@@ -365,7 +365,7 @@ All deployments are automatically versioned with on-chain history tracking. User
 1. **First Deployment**: Creates a versioning inscription origin with metadata containing version-to-outpoint mappings
 2. **Subsequent Deployments**: Spends the previous inscription and adds new version metadata, creating an unlimited version history chain
 3. **Version Redirect**: Automatically injected script queries inscription metadata to resolve version queries
-4. **Always Latest**: Use `?seq=-1` to always access the latest version via ordfs.network's origin chain resolution
+4. **Always Latest**: Pointing to your origin html inscription will intelligently redirect to the latest deployed version of it.
 
 ### First Deployment
 
@@ -424,15 +424,15 @@ Version redirect script is automatically injected starting with the second deplo
 
 ### Accessing Versions
 
-- **Latest via inscription**: `https://ordfs.network/content/<ORIGIN>` - always serves latest location
+- **Latest via inscription**: Access via content providers (e.g., `https://ordfs.network/content/<ORIGIN>`) - always serves latest location
 - **Specific version**: `<ENTRY_POINT_URL>?version=1.0.0` - redirects to specific version
 
 ### Custom Domains
 
-Point your domain to always serve the latest version:
+Point your domain to always serve the latest version via your chosen content provider:
 
 ```
-# DNS/CDN redirect to always get latest
+# Example: DNS/CDN redirect to always get latest (using ordfs.network)
 https://ordfs.network/content/<ORIGIN>
 ```
 
@@ -441,14 +441,14 @@ Or point to the entry point and let users control versions via `?version=` param
 ### Querying Version Information
 
 ```bash
-# View all versions
-npx react-onchain version:history <INSCRIPTION_ORIGIN>
+# View all versions (inscription auto-read from manifest if not provided)
+npx react-onchain version:history [INSCRIPTION_ORIGIN]
 
-# Get specific version details
-npx react-onchain version:info <INSCRIPTION_ORIGIN> <VERSION>
+# Get specific version details (inscription auto-read from manifest if not provided)
+npx react-onchain version:info <VERSION> [INSCRIPTION_ORIGIN]
 
-# Get inscription information
-npx react-onchain version:summary <INSCRIPTION_ORIGIN>
+# Get inscription information (inscription auto-read from manifest if not provided)
+npx react-onchain version:summary [INSCRIPTION_ORIGIN]
 ```
 
 **Advanced: Versioning CLI flags** (for automation/CI-CD):
@@ -520,8 +520,10 @@ import { deployToChain } from 'react-onchain';
 
 const config = {
   buildDir: './dist',
-  paymentKey: 'your-wif-key',
-  destinationAddress: 'your-ordinal-address',
+  paymentKey: 'your-wif-key', // Destination address is auto-derived from this key
+  version: '1.0.0',
+  versionDescription: 'Initial release',
+  appName: 'MyApp',
   satsPerKb: 50,
   dryRun: false,
 };
@@ -532,6 +534,7 @@ console.log(`Entry point: ${result.entryPointUrl}`);
 console.log(`Total files: ${result.inscriptions.length}`);
 console.log(`Total size: ${result.totalSize} bytes`);
 console.log(`Total cost: ${result.totalCost} satoshis`);
+console.log(`Versioning origin: ${result.versioningOriginInscription}`);
 ```
 
 ## Supported File Types
@@ -580,9 +583,7 @@ react-onchain/
 │   ├── services/
 │   │   ├── gorilla-pool/                 # GorillaPool indexer implementation
 │   │   │   ├── indexer.ts
-│   │   │   ├── types.ts
-│   │   │   ├── constants.ts
-│   │   │   └── browserConfig.ts
+│   │   │   └── constants.ts
 │   │   ├── IndexerService.ts             # Indexer abstraction interface
 │   │   └── index.ts                      # Service exports
 │   ├── analyzer.ts                       # Build analysis & dependency graph
@@ -595,8 +596,8 @@ react-onchain/
 │   ├── types.ts                          # TypeScript type definitions
 │   ├── versioningInscriptionHandler.ts   # Inscription-based versioning
 │   ├── versionRedirect.template.js       # Client-side version redirect script
+│   ├── basePathFix.template.js           # React Router base path configuration
 │   └── index.ts                          # Public API exports
-├── tests/                                # Test suite
 ├── dist/                                 # Compiled JavaScript
 └── package.json
 ```
@@ -623,18 +624,19 @@ Point to the correct build directory (usually `./dist` or `./build`).
 - Ensure payment address has funds
 - Check network connectivity
 
-### Files not loading on ordfs.network
+### Files not loading
 
-- Wait a few minutes for indexing
+- Wait a few minutes for content provider indexing
 - Verify transactions are confirmed on-chain
 - Check console for CORS or network errors
+- Try an alternative content provider if available
 
 ## Limitations
 
 - Build must contain `index.html` at the root
 - External CDN references are not rewritten
 - Dynamic imports must use relative paths
-- ordfs.network may have indexing delays
+- Content providers may have indexing delays
 
 ## Contributing
 
@@ -697,8 +699,11 @@ ISC
 - [js-1sat-ord](https://github.com/BitcoinSchema/js-1sat-ord) - 1Sat Ordinals library
 - [@bsv/sdk](https://github.com/bitcoin-sv/ts-sdk) - BSV TypeScript SDK
 - [commander](https://github.com/tj/commander.js) - CLI framework
+- [@inquirer/prompts](https://github.com/SBoudrias/Inquirer.js) - Interactive CLI prompts
 - [chalk](https://github.com/chalk/chalk) - Terminal styling
 - [ora](https://github.com/sindresorhus/ora) - Terminal spinners
+- [axios](https://github.com/axios/axios) - HTTP client
+- [dotenv](https://github.com/motdotla/dotenv) - Environment configuration
 
 ## Links
 
