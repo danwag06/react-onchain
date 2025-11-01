@@ -1,6 +1,6 @@
 {
   "name": "react-onchain",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Deploy React applications to the BSV blockchain.",
   "main": "dist/index.js",
   "type": "module",
@@ -9,6 +9,8 @@
   },
   "files": [
     "dist/",
+    "README.md",
+    "LICENSE",
     "js-1sat-ord-0.1.83.tgz",
     "node_modules/js-1sat-ord"
   ],
