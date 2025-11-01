@@ -963,6 +963,9 @@ program
     'Show version history for a versioning inscription (auto-reads from manifest if not specified)'
   )
   .option('-m, --manifest <file>', 'Path to manifest file', 'deployment-manifest.json')
+  .option('-l, --limit <number>', 'Limit number of versions to display', '10')
+  .option('-f, --from-version <version>', 'Start displaying from a specific version')
+  .option('-a, --all', 'Show all versions (ignores limit)')
   .action(async (inscriptionOrigin, options) => {
     try {
       // If inscription not provided, try to read from manifest
@@ -994,6 +997,56 @@ program
 
       spinner.succeed(chalk.green(`Found ${history.length} version(s)`));
 
+      // Check for sync warning: compare latest on-chain with latest in manifest
+      let manifestLatestVersion: string | null = null;
+      if (existsSync(options.manifest)) {
+        try {
+          const manifestJson = await readFile(options.manifest, 'utf-8');
+          const manifestData = JSON.parse(manifestJson);
+          if ('manifestVersion' in manifestData && 'deployments' in manifestData) {
+            const latestDeployment = manifestData.deployments[manifestData.deployments.length - 1];
+            manifestLatestVersion = latestDeployment?.version;
+          }
+        } catch (error) {
+          // Ignore manifest read errors
+        }
+      }
+
+      const onChainLatestVersion = history[0]?.version;
+      if (manifestLatestVersion && onChainLatestVersion !== manifestLatestVersion) {
+        console.log(
+          chalk.yellow(
+            '\n⚠️  Warning: On-chain versioning data is still syncing. Latest on-chain version differs from manifest.'
+          )
+        );
+        console.log(
+          chalk.gray(
+            `   Manifest latest: ${manifestLatestVersion} | On-chain latest: ${onChainLatestVersion}`
+          )
+        );
+        console.log(chalk.gray('   Check back in a few moments for updated data.\n'));
+      }
+
+      // Apply pagination/filtering
+      let displayHistory = history;
+      const limit = options.all ? history.length : parseInt(options.limit, 10);
+
+      // Filter from specific version if requested
+      if (options.fromVersion) {
+        const startIndex = history.findIndex((v) => v.version === options.fromVersion);
+        if (startIndex === -1) {
+          console.error(chalk.red(`\n❌ Version ${options.fromVersion} not found in history.\n`));
+          process.exit(1);
+        }
+        displayHistory = history.slice(startIndex);
+      }
+
+      // Apply limit
+      displayHistory = displayHistory.slice(0, limit);
+
+      const showingCount = displayHistory.length;
+      const totalCount = history.length;
+
       console.log(chalk.gray('─'.repeat(70)));
       console.log(
         chalk.gray('Version'.padEnd(15)) +
@@ -1002,9 +1055,9 @@ program
       );
       console.log(chalk.gray('─'.repeat(70)));
 
-      for (let i = 0; i < history.length; i++) {
-        const { version, description } = history[i];
-        const isLatest = i === 0;
+      for (let i = 0; i < displayHistory.length; i++) {
+        const { version, description } = displayHistory[i];
+        const isLatest = history[0].version === version;
         const status = isLatest ? chalk.green('(latest)') : '';
         const truncatedDesc =
           description.length > 37 ? description.substring(0, 34) + '...' : description;
@@ -1014,6 +1067,15 @@ program
       }
 
       console.log(chalk.gray('─'.repeat(70)));
+
+      if (showingCount < totalCount) {
+        console.log(
+          chalk.gray(
+            `\nShowing ${showingCount} of ${totalCount} versions. Use --all to see all or --limit <n> to adjust.`
+          )
+        );
+      }
+
       console.log(chalk.gray(`\nApp: ${info.appName}`));
       console.log(chalk.gray(`Origin: ${info.originOutpoint}\n`));
     } catch (error) {
