@@ -1,12 +1,16 @@
 {
   "name": "react-onchain",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Deploy React applications to the BSV blockchain.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
     "react-onchain": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "js-1sat-ord-0.1.83.tgz"
+  ],
   "scripts": {
     "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run format",
     "dev": "tsc --watch",
