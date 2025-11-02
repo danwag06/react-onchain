@@ -19,7 +19,7 @@
     "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run format",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node --test dist/analyzer.test.js",
     "format": "prettier --write \"src/**/*.ts\" \"*.md\" \"*.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"*.md\" \"*.json\""
   },
