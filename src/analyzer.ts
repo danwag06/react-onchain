@@ -56,7 +56,7 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
   const references: string[] = [];
   const fileDir = dirname(filePath);
 
-  // Match script src, link href, img src, meta content, etc.
+  // Match script src, link href, img src, etc.
   const patterns = [
     /<script[^>]+src=["']([^"']+)["']/gi,
     /<link[^>]+href=["']([^"']+)["']/gi,
@@ -64,10 +64,31 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
     /<source[^>]+src=["']([^"']+)["']/gi,
     /<video[^>]+src=["']([^"']+)["']/gi,
     /<audio[^>]+src=["']([^"']+)["']/gi,
-    /<meta[^>]+content=["']([^"']+)["']/gi,
   ];
 
   for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const ref = match[1];
+      // Skip external URLs and data URIs
+      if (!shouldSkipUrl(ref)) {
+        // Resolve relative to the HTML file
+        const resolvedPath = ref.startsWith('/')
+          ? join(baseDir, ref.substring(1))
+          : resolve(fileDir, ref);
+        references.push(resolvedPath);
+      }
+    }
+  }
+
+  // Separately handle meta tags with og:image or twitter:image properties
+  // These can have property/content in either order
+  const metaImagePatterns = [
+    /<meta[^>]*property=["'](?:og:image|twitter:image)["'][^>]*content=["']([^"']+)["']/gi,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*property=["'](?:og:image|twitter:image)["']/gi,
+  ];
+
+  for (const pattern of metaImagePatterns) {
     let match;
     while ((match = pattern.exec(content)) !== null) {
       const ref = match[1];

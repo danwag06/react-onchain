@@ -480,9 +480,7 @@ program
       // Step 0.5: Build reminder prompt (only in interactive mode)
       if (!options.dryRun && !wasPaymentKeyProvided && !wasVersionTagProvided) {
         console.log();
-        console.log(
-          chalk.yellow('⚠️  Before deploying, make sure you have built your project!')
-        );
+        console.log(chalk.yellow('⚠️  Before deploying, make sure you have built your project!'));
         console.log(
           chalk.gray('   Run your build command (e.g., ') +
             chalk.cyan('npm run build') +
@@ -497,7 +495,9 @@ program
           });
 
           if (!hasBuilt) {
-            console.log(chalk.yellow('\n✋ Please build your project first, then run deploy again.\n'));
+            console.log(
+              chalk.yellow('\n✋ Please build your project first, then run deploy again.\n')
+            );
             process.exit(0);
           }
 
