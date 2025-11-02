@@ -56,7 +56,7 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
   const references: string[] = [];
   const fileDir = dirname(filePath);
 
-  // Match script src, link href, img src, etc.
+  // Match script src, link href, img src, meta content, etc.
   const patterns = [
     /<script[^>]+src=["']([^"']+)["']/gi,
     /<link[^>]+href=["']([^"']+)["']/gi,
@@ -64,6 +64,7 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
     /<source[^>]+src=["']([^"']+)["']/gi,
     /<video[^>]+src=["']([^"']+)["']/gi,
     /<audio[^>]+src=["']([^"']+)["']/gi,
+    /<meta[^>]+content=["']([^"']+)["']/gi,
   ];
 
   for (const pattern of patterns) {
