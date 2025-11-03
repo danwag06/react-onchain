@@ -41,6 +41,7 @@ import {
   VERSIONING_METADATA_TYPE,
   CONTENT_PATH_PREFIX,
   OUTPOINT_SEPARATOR,
+  CACHED_FILE_DELIMITER,
   DEFAULT_SATS_PER_KB,
   DEFAULT_INSCRIPTION_VOUT,
   MANIFEST_VERSION,
@@ -96,10 +97,35 @@ async function loadManifestData(manifestPath: string): Promise<ManifestData | nu
 
       if (history.deployments.length > 0) {
         const recentDeployment = history.deployments[history.deployments.length - 1];
+
+        // Load all files from manifest (new files with full details)
         for (const file of recentDeployment.files) {
-          // Load all files from manifest (not just those with contentHash)
-          // For chunked files, the chunks array is enough to verify reusability
           result.previousInscriptions.set(file.originalPath, file);
+        }
+
+        // Load cached files (minimal string references from previous deployments)
+        // Format: "path::*::txid_vout"
+        // Search backwards through deployment history to find full file details
+        if (recentDeployment.cachedFiles) {
+          for (const cachedStr of recentDeployment.cachedFiles) {
+            // Parse the cached file string
+            const [originalPath, outpoint] = cachedStr.split(CACHED_FILE_DELIMITER);
+            const [txid, voutStr] = outpoint.split('_');
+            const vout = parseInt(voutStr, 10);
+
+            // Search previous deployments for this file
+            let foundFile: InscribedFile | undefined;
+            for (let i = history.deployments.length - 1; i >= 0 && !foundFile; i--) {
+              const deployment = history.deployments[i];
+              foundFile = deployment.files.find(
+                (f) => f.originalPath === originalPath && f.txid === txid && f.vout === vout
+              );
+            }
+
+            if (foundFile) {
+              result.previousInscriptions.set(originalPath, foundFile);
+            }
+          }
         }
       }
     } else if ('timestamp' in manifestData && 'entryPoint' in manifestData) {
@@ -107,11 +133,14 @@ async function loadManifestData(manifestPath: string): Promise<ManifestData | nu
       if (manifest.version) {
         result.existingVersions = [manifest.version];
       }
+
+      // Load all new files from manifest
       for (const file of manifest.files) {
-        // Load all files from manifest (not just those with contentHash)
-        // For chunked files, the chunks array is enough to verify reusability
         result.previousInscriptions.set(file.originalPath, file);
       }
+
+      // For backward compatibility: old manifests may have cached files in the files array
+      // (identified by the cached flag). These are already loaded above.
     }
 
     return result;
@@ -427,8 +456,7 @@ export async function deployToChain(
 
         serviceWorkerInscription = { ...previousSW, cached: true };
         inscriptions.push(serviceWorkerInscription);
-        txids.add(previousSW.txid);
-        totalSize += previousSW.size;
+        // Note: Do NOT add cached SW txid or size to totals - it's from a previous deployment
         jobContext.serviceWorkerUrl = previousSW.urlPath;
 
         callbacks?.onProgress?.(
@@ -465,6 +493,11 @@ export async function deployToChain(
           spentUtxos,
           callbacks?.onProgress
         );
+
+        // Track split UTXO transaction for service worker (if any)
+        if (swInscriptionResult.splitTxid) {
+          txids.add(swInscriptionResult.splitTxid);
+        }
 
         serviceWorkerInscription = {
           ...swInscriptionResult.results[0].inscription,
@@ -503,15 +536,11 @@ export async function deployToChain(
       if (shouldReuse && previousInscription) {
         inscriptions.push({ ...previousInscription, cached: true });
         urlMap.set(filePath, previousInscription.urlPath);
-        txids.add(previousInscription.txid);
-        totalSize += previousInscription.size;
+        // Note: Do NOT add cached file txids or sizes to totals - these are from previous deployments
 
-        // If this is a chunked file, also track its chunks
+        // If this is a chunked file, note its chunk count
         let chunkCount: number | undefined;
         if (previousInscription.isChunked && previousInscription.chunks) {
-          for (const chunk of previousInscription.chunks) {
-            txids.add(chunk.txid);
-          }
           chunkCount = previousInscription.chunks.length;
           // Note: Manifest already added to allChunkManifests during cache analysis
         }
@@ -553,6 +582,11 @@ export async function deployToChain(
       spentUtxos, // Pass spent UTXOs from previous waves
       callbacks?.onProgress
     );
+
+    // Track split UTXO transaction (in chronological order before inscriptions)
+    if (inscriptionResult.splitTxid) {
+      txids.add(inscriptionResult.splitTxid);
+    }
 
     // Add cost from this wave
     totalCost += inscriptionResult.totalCost;
@@ -685,16 +719,19 @@ export async function deployToChain(
 // Keep existing manifest generation functions
 export function generateManifest(result: DeploymentResult): DeploymentManifest {
   const newFiles = result.inscriptions.filter((f) => !f.cached);
-  const cachedFiles = result.inscriptions.filter((f) => f.cached);
-  const newFileTransactions = result.txids.filter((txid) =>
-    newFiles.some((file) => file.txid === txid)
+  const cachedFilesFull = result.inscriptions.filter((f) => f.cached);
+
+  // Create minimal cached file string array (format: "path::*::txid_vout")
+  const cachedFiles = cachedFilesFull.map(
+    (f) => `${f.originalPath}${CACHED_FILE_DELIMITER}${f.txid}_${f.vout}`
   );
 
   return {
     timestamp: new Date().toISOString(),
     entryPoint: result.entryPointUrl,
-    files: result.inscriptions,
-    totalFiles: result.inscriptions.length,
+    files: newFiles,
+    cachedFiles,
+    totalFiles: newFiles.length,
     totalCost: result.totalCost,
     totalSize: result.totalSize,
     transactions: result.txids,
@@ -705,8 +742,8 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     destinationAddress: result.destinationAddress,
     ordinalContentUrl: result.ordinalContentUrl,
     newFiles: newFiles.length,
-    cachedFiles: cachedFiles.length,
-    newTransactions: newFileTransactions.length,
+    cachedCount: cachedFiles.length,
+    newTransactions: result.txids.length,
   };
 }
 

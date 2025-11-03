@@ -114,6 +114,7 @@ export interface InscriptionResult {
 export interface ParallelInscriptionResult {
   results: InscriptionResult[];
   totalCost: number; // Total fees paid (in satoshis)
+  splitTxid?: string; // Split UTXO transaction ID (undefined if no split was needed)
 }
 
 /**
@@ -273,7 +274,7 @@ export async function prepareUtxosForJobs(
   seedUtxo?: Utxo,
   spentUtxos?: Set<string>,
   onProgress?: ProgressCallback
-): Promise<Utxo[]> {
+): Promise<{ utxos: Utxo[]; splitTxid: string }> {
   onProgress?.(`💰 Preparing ${feeCalculations.length} perfectly-sized UTXOs...`);
 
   const exactSatAmounts = feeCalculations.map((calc) => calc.requiredSats);
@@ -302,7 +303,7 @@ export async function prepareUtxosForJobs(
     `✓ All UTXOs prepared (${splitResult.utxos.length} UTXOs in 1 transaction: ${splitResult.txid.slice(0, 16)}...)`
   );
 
-  return splitResult.utxos;
+  return { utxos: splitResult.utxos, splitTxid: splitResult.txid };
 }
 
 /**
@@ -654,7 +655,7 @@ export async function parallelInscribe(
   const totalCost = feeCalculations.reduce((sum, calc) => sum + calc.exactFee, 0);
 
   // Phase 2: Prepare perfectly-sized UTXOs (one split transaction)
-  const utxos = await prepareUtxosForJobs(
+  const { utxos, splitTxid } = await prepareUtxosForJobs(
     paymentKey,
     indexer,
     feeCalculations,
@@ -680,5 +681,6 @@ export async function parallelInscribe(
   return {
     results,
     totalCost,
+    splitTxid,
   };
 }

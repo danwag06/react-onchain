@@ -74,10 +74,14 @@ export interface DeploymentResult {
 export interface DeploymentManifest {
   timestamp: string;
   entryPoint: string;
+  /** Newly inscribed files (full details) */
   files: InscribedFile[];
+  /** Cached/reused files from previous deployments (format: "path::*::txid_vout") */
+  cachedFiles: string[];
   totalFiles: number;
   totalCost: number;
   totalSize: number;
+  /** All transactions in chronological order (versioning, UTXO split, inscriptions, metadata update) */
   transactions: string[];
   /** Latest versioning inscription outpoint after this deployment */
   latestVersioningInscription?: string;
@@ -94,7 +98,7 @@ export interface DeploymentManifest {
   /** Number of newly inscribed files */
   newFiles: number;
   /** Number of cached/reused files */
-  cachedFiles: number;
+  cachedCount: number;
   /** Number of new transactions created */
   newTransactions: number;
 }
