@@ -339,25 +339,12 @@ Point your domain to your deployment using DNS redirects or URL rewrites. Each d
 
 ### Important: Version Redirect Behavior
 
-**Key Point:** Accessing `/content/<origin>` directly does NOT automatically redirect to the latest version. The version redirect script only activates when `?version=` is present in the URL.
+**Key Point:** Accessing `/content/<origin>` directly will automatically redirect to the latest deployed version (no configuration needed).
 
 **URL Behavior:**
 
-- `/content/<origin>` → Loads that specific deployment (no redirect)
-- `/content/<origin>?version=latest` → Redirects to latest version
-- `/content/<origin>?version=1.2.0` → Redirects to version 1.2.0
-
-**For Always-Latest Deployments:**
-
-If you want your domain to always serve the latest version, point your DNS to include the `?version=latest` parameter:
-
-```
-# Cloudflare redirect example
-From: yourdomain.com
-To: https://ordfs.network/content/<ORIGIN>?version=latest
-```
-
-This ensures users always get redirected to the most recent deployment while maintaining the ability to access specific versions when needed.
+- `/content/<origin>` → Loads the latest version
+- `/content/<origin>?version=1.2.0` → Redirects to version specified
 
 ## Versioning
 
@@ -427,7 +414,7 @@ Version redirect script is automatically injected starting with the second deplo
 
 ### Accessing Versions
 
-- **Latest via inscription**: Access via content providers (e.g., `https://ordfs.network/content/<ORIGIN>`) - always serves latest location
+- **Latest via inscription**: Access via content providers (e.g., `https://app.reactonchain.com/content/<ORIGIN>`) - always serves latest location
 - **Specific version**: `<ENTRY_POINT_URL>?version=1.0.0` - redirects to specific version
 
 ### Custom Domains
@@ -435,8 +422,8 @@ Version redirect script is automatically injected starting with the second deplo
 Point your domain to always serve the latest version via your chosen content provider:
 
 ```
-# Example: DNS/CDN redirect to always get latest (using ordfs.network)
-https://ordfs.network/content/<ORIGIN>
+# Example: DNS/CDN redirect to always get latest (using app.reactonchain.com)
+https://app.reactonchain.com/content/<ORIGIN>
 ```
 
 Or point to the entry point and let users control versions via `?version=` parameter.
