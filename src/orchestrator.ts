@@ -372,7 +372,7 @@ export async function deployToChain(
 
   // Step 4.5: Reorganize waves to ensure HTML is processed last
   // This allows us to inscribe the Service Worker before HTML
-  let htmlWave: string[] = [];
+  const htmlWave: string[] = [];
   const nonHtmlWaves: string[][] = [];
 
   for (const wave of waves) {
@@ -472,7 +472,7 @@ export async function deployToChain(
           },
         ];
 
-        const swResults = await parallelInscribe(
+        const swInscriptionResult = await parallelInscribe(
           swJobs,
           paymentPk,
           indexer,
@@ -485,10 +485,11 @@ export async function deployToChain(
         );
 
         serviceWorkerInscription = {
-          ...swResults[0].inscription,
+          ...swInscriptionResult.results[0].inscription,
           contentHash: swContentHash, // Store hash for future caching
         };
         txids.add(serviceWorkerInscription.txid);
+        totalCost += swInscriptionResult.totalCost;
 
         // Add Service Worker to inscriptions immediately (before HTML)
         inscriptions.push(serviceWorkerInscription);
@@ -559,7 +560,7 @@ export async function deployToChain(
     }
 
     // Inscribe all jobs in parallel
-    const results = await parallelInscribe(
+    const inscriptionResult = await parallelInscribe(
       jobs,
       paymentPk,
       indexer,
@@ -571,12 +572,15 @@ export async function deployToChain(
       callbacks?.onProgress
     );
 
+    // Add cost from this wave
+    totalCost += inscriptionResult.totalCost;
+
     // Clear seed UTXO after first wave (it's been used)
     seedUtxo = undefined;
 
     // Process results
     // Note: chunkSize passed here is only for metadata - actual chunk sizes are stored in each chunk
-    const processed = processWaveResults(results, urlMap, jobContext.chunkSize);
+    const processed = processWaveResults(inscriptionResult.results, urlMap, jobContext.chunkSize);
 
     // Add regular files to inscriptions
     for (const inscribedFile of processed.regularFiles) {

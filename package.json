@@ -16,11 +16,12 @@
     "js-1sat-ord"
   ],
   "scripts": {
-    "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run format",
+    "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run lint",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "test": "npm run build && node --test dist/tests/analyzer.test.js",
     "test:sw-local": "npm run build && node dist/tests/sw-local-test.js",
+    "lint": "eslint --fix 'src/**/*.ts' && prettier --write \"src/**/*.ts\" \"*.md\" \"*.json\"",
     "format": "prettier --write \"src/**/*.ts\" \"*.md\" \"*.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"*.md\" \"*.json\""
   },
@@ -55,6 +56,9 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/superagent": "^8.1.9",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "eslint": "^9.39.0",
     "prettier": "^3.6.2",
     "typescript": "^5.7.0"
   }

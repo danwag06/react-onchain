@@ -16,14 +16,9 @@
  * 3. **Phase 3: Transaction Building**
  *    - Builds ALL inscription transactions using pre-allocated UTXOs
  *    - Stores raw transaction hex (never rebuilds on retry)
- *    - Does NOT broadcast yet
  *
- * 4. **Phase 4: Verification**
- *    - Verifies ALL transactions using tx.verify('scripts only', feeModel)
- *    - Detects double-spends BEFORE any broadcasting
- *    - Aborts entire process if any transaction fails verification
  *
- * 5. **Phase 5: Broadcasting**
+ * 4. **Phase 5: Broadcasting**
  *    - Broadcasts all transactions in parallel batches
  *    - Retry logic ONLY retries broadcast of same raw tx hex
  *    - NEVER rebuilds transactions during retry
@@ -111,6 +106,14 @@ export interface BuiltTransaction {
 export interface InscriptionResult {
   job: InscriptionJob;
   inscription: InscribedFile;
+}
+
+/**
+ * Result of parallel inscription including cost information
+ */
+export interface ParallelInscriptionResult {
+  results: InscriptionResult[];
+  totalCost: number; // Total fees paid (in satoshis)
 }
 
 /**
@@ -406,20 +409,6 @@ export async function buildAllTransactions(
 }
 
 /**
- * Verifies ALL transactions to detect double-spends BEFORE broadcasting
- */
-export async function verifyAllTransactions(
-  builtTxs: BuiltTransaction[],
-  satsPerKb: number = 1
-): Promise<void> {
-  // NOTE: Skipping tx.verify() due to BSV SDK bug with source transactions
-  // The transactions are correctly built and signed
-  console.log(
-    `\n✓ All ${builtTxs.length} transactions built and signed (verification skipped due to SDK issue)\n`
-  );
-}
-
-/**
  * Finds the inscription output index
  * - For ordinals: 1-sat output
  * - For B files: 0-sat output (always at index 0)
@@ -650,7 +639,7 @@ export async function parallelInscribe(
   seedUtxo?: Utxo,
   spentUtxos?: Set<string>,
   onProgress?: ProgressCallback
-): Promise<InscriptionResult[]> {
+): Promise<ParallelInscriptionResult> {
   onProgress?.(`⚡ Starting parallel inscription for ${jobs.length} jobs...`);
 
   // Phase 1: Calculate EXACT fees using getFee() (builds placeholder transactions)
@@ -661,6 +650,9 @@ export async function parallelInscribe(
     batchSize,
     onProgress
   );
+
+  // Calculate total cost (sum of all exact fees)
+  const totalCost = feeCalculations.reduce((sum, calc) => sum + calc.exactFee, 0);
 
   // Phase 2: Prepare perfectly-sized UTXOs (one split transaction)
   const utxos = await prepareUtxosForJobs(
@@ -685,5 +677,8 @@ export async function parallelInscribe(
     onProgress
   );
 
-  return results;
+  return {
+    results,
+    totalCost,
+  };
 }

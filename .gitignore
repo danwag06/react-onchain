@@ -8,6 +8,7 @@ test-app/
 .claude
 .test-sw-output/
 video-test/
+blah-test/
 
 # Environment variables (may contain sensitive keys)
 .env*

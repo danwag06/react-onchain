@@ -10,8 +10,9 @@ import {
   RETRY_INITIAL_DELAY_MS,
   RETRY_MAX_DELAY_MS,
   DRY_RUN_DELAY_MS,
-  DEFAULT_SATS_PER_KB,
-  CHUNK_BUFFER_MULTIPLIER,
+  TX_BASE_SIZE,
+  TX_INPUT_SIZE,
+  TX_OUTPUT_SIZE,
 } from './utils/constants.js';
 import { createHash } from 'crypto';
 import { addUtxoInput } from './utils/helpers.js';
@@ -26,33 +27,6 @@ export interface UtxoSplitResult {
   txid: string;
   /** Total satoshis used (including fees) */
   totalSats: number;
-}
-
-/**
- * Estimates the satoshis needed for a batch of chunks
- *
- * @param chunkCount - Number of chunks to inscribe
- * @param avgChunkSize - Average size of each chunk in bytes
- * @param satsPerKb - Fee rate in satoshis per kilobyte
- * @param bufferMultiplier - Safety buffer multiplier (default: 1.2 = 20% buffer)
- * @returns Estimated satoshis needed
- */
-export function estimateSatsForChunks(
-  chunkCount: number,
-  avgChunkSize: number,
-  satsPerKb: number = DEFAULT_SATS_PER_KB,
-  bufferMultiplier: number = CHUNK_BUFFER_MULTIPLIER
-): number {
-  // Estimate for each chunk inscription
-  const estimatedTxSizePerChunk = avgChunkSize + TX_OVERHEAD_BYTES;
-  const estimatedFeePerChunk = Math.ceil((estimatedTxSizePerChunk / 1000) * satsPerKb);
-  const requiredSatsPerChunk = estimatedFeePerChunk + INSCRIPTION_OUTPUT_SATS;
-
-  // Total for all chunks
-  const baseTotal = requiredSatsPerChunk * chunkCount;
-
-  // Add buffer for safety
-  return Math.ceil(baseTotal * bufferMultiplier);
 }
 
 /**
@@ -99,7 +73,7 @@ export async function splitUtxoForParallelInscription(
 
   // Estimate split transaction fee
   // Each output is ~34 bytes, input is ~148 bytes, base tx is ~10 bytes
-  const estimatedTxSize = 10 + 148 + 34 * outputCount;
+  const estimatedTxSize = TX_BASE_SIZE + TX_INPUT_SIZE + TX_OUTPUT_SIZE * outputCount;
   const estimatedFee = Math.ceil((estimatedTxSize / 1000) * satsPerKb);
   const totalRequired = totalOutputSats + estimatedFee + UTXO_FETCH_BUFFER_SATS;
 
@@ -213,9 +187,6 @@ export async function splitUtxoForParallelInscription(
   onProgress?.(`Signing split transaction...`);
   await tx.fee(new SatoshisPerKilobyte(satsPerKb));
   await tx.sign();
-
-  // NOTE: Skipping tx.verify() due to BSV SDK bug with source transactions
-  // The transaction is correctly built and signed
 
   // Broadcast with retry
   onProgress?.(`Preparing files and utxos...`);

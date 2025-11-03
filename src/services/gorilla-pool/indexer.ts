@@ -136,7 +136,7 @@ export class GorillaPoolIndexer extends IndexerService {
   async listUnspent(address: string, options?: UtxoQueryOptions): Promise<Utxo[]> {
     const limit = 100; // GorillaPool API pagination limit
     let from = 0;
-    let allSpendableUtxos: Utxo[] = [];
+    const allSpendableUtxos: Utxo[] = [];
 
     // Calculate required satoshis if options provided
     let requiredSats = 0;

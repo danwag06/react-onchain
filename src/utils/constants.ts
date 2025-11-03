@@ -43,6 +43,15 @@ export const UTXO_FETCH_BUFFER_SATS = 100;
 export const DRY_RUN_DELAY_MS = 100;
 
 // ============================================================================
+// UTXO Splitter Transaction Size Constants
+// ============================================================================
+
+// Approximate size of transaction components in bytes
+export const TX_BASE_SIZE = 10; // Base transaction overhead
+export const TX_INPUT_SIZE = 148; // Approximate size of each transaction input
+export const TX_OUTPUT_SIZE = 34; // Approximate size of each transaction output
+
+// ============================================================================
 // Chunking Configuration
 // ============================================================================
 

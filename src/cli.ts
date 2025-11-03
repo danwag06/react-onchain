@@ -881,7 +881,10 @@ program
           const shortUrl = absoluteUrl.split('/').pop() || url;
           spinner.stopAndPersist({
             symbol: chalk.green('✓'),
-            text: chalk.white(file.padEnd(35)) + chalk.gray(' → ') + chalk.cyan(shortUrl),
+            text:
+              chalk.white(file.padEnd(CLI_CONSTANTS.FILENAME_MAX_LENGTH)) +
+              chalk.gray(' → ') +
+              chalk.cyan(shortUrl),
           });
 
           // Show overall progress after completion
@@ -908,7 +911,10 @@ program
           spinner.stopAndPersist({
             symbol: chalk.blue('↻'),
             text:
-              chalk.white(file.padEnd(35)) + chalk.gray(' → ') + chalk.cyan(shortUrl) + cacheInfo,
+              chalk.white(file.padEnd(CLI_CONSTANTS.FILENAME_MAX_LENGTH)) +
+              chalk.gray(' → ') +
+              chalk.cyan(shortUrl) +
+              cacheInfo,
           });
 
           // Show overall progress after skipping
