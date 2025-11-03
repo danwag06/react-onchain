@@ -396,27 +396,35 @@ export function generateServiceWorkerRegistration(swUrl: string): string {
 <script>
   // Register Service Worker for chunk reassembly
   // IMPORTANT: Registered immediately (not on 'load') to fix race condition with video loading
-  if ('serviceWorker' in navigator) {
-    // Create a promise that resolves when SW is ready
-    window.swReady = navigator.serviceWorker.register('${swUrl}')
-      .then(registration => {
-        console.log('Chunk reassembly SW registered:', registration.scope);
-        return navigator.serviceWorker.ready;
-      })
-      .then(() => {
-        console.log('Chunk reassembly SW active and ready');
-        // Dispatch custom event for video elements to know SW is ready
-        window.dispatchEvent(new CustomEvent('sw-ready'));
-        return true;
-      })
-      .catch(error => {
-        console.error('SW registration failed:', error);
-        return false;
-      });
-  } else {
-    // No service worker support - resolve immediately
-    window.swReady = Promise.resolve(false);
-  }
+  // Debug mode: Add ?debug=true to URL to enable console logging
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const DEBUG = params.get('debug') === 'true';
+    const log = DEBUG ? console.log.bind(console) : function() {};
+    const error = console.error.bind(console);
+
+    if ('serviceWorker' in navigator) {
+      // Create a promise that resolves when SW is ready
+      window.swReady = navigator.serviceWorker.register('${swUrl}')
+        .then(registration => {
+          log('[react-onchain] Chunk reassembly SW registered:', registration.scope);
+          return navigator.serviceWorker.ready;
+        })
+        .then(() => {
+          log('[react-onchain] Chunk reassembly SW active and ready');
+          // Dispatch custom event for video elements to know SW is ready
+          window.dispatchEvent(new CustomEvent('sw-ready'));
+          return true;
+        })
+        .catch(err => {
+          error('[react-onchain] SW registration failed:', err);
+          return false;
+        });
+    } else {
+      // No service worker support - resolve immediately
+      window.swReady = Promise.resolve(false);
+    }
+  })();
 
   // Helper function for video elements to wait for SW before loading
   // Usage in your app:

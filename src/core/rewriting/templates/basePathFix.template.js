@@ -18,9 +18,17 @@
  * 1. Content provider (e.g., ordfs.network): /content/{txid}_{vout} → Sets up base path
  * 2. Custom domain: / → No changes needed
  * 3. Local development: localhost → Falls back to '/'
+ *
+ * Debug mode: Add ?debug=true to URL to enable console logging
  */
 (function () {
   'use strict';
+
+  // Debug logger - only logs if ?debug=true
+  const params = new URLSearchParams(window.location.search);
+  const DEBUG = params.get('debug') === 'true';
+  const log = DEBUG ? console.log.bind(console) : () => {};
+  const error = console.error.bind(console); // Errors always shown
 
   try {
     const currentPath = window.location.pathname;
@@ -31,12 +39,12 @@
 
     if (!contentPathMatch) {
       // Not on a content provider path, assume root path (custom domain or local dev)
-      console.log('[react-onchain] Running at root path (custom domain or local)');
+      log('[react-onchain] Running at root path (custom domain or local)');
       return;
     }
 
     const basePath = contentPathMatch[0];
-    console.log('[react-onchain] Content provider deployment detected, base path:', basePath);
+    log('[react-onchain] Content provider deployment detected, base path:', basePath);
 
     // Set base path immediately as fallback
     // If versionRedirect.template.js is present, it will update this after version resolution
@@ -63,7 +71,7 @@
       return basePath;
     };
 
-    console.log('[react-onchain] Base path configured (will be updated if version redirect occurs):', basePath);
+    log('[react-onchain] Base path configured (will be updated if version redirect occurs):', basePath);
 
     // Patch link clicks to work correctly with React Router and base path
     // This handles cases where React Router intercepts <a> clicks
@@ -90,13 +98,13 @@
           window.history.pushState(null, '', newPath);
           window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
 
-          console.log('[react-onchain] Link navigation:', href, '→', newPath);
+          log('[react-onchain] Link navigation:', href, '→', newPath);
         }
       }, true); // Capture phase to intercept before React Router
 
-      console.log('[react-onchain] Link patching enabled');
+      log('[react-onchain] Link patching enabled');
     })();
   } catch (error) {
-    console.error('[react-onchain] Error setting up routing:', error);
+    error('[react-onchain] Error setting up routing:', error);
   }
 })();

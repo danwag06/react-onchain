@@ -9,6 +9,8 @@ import {
   injectVersionScript,
   injectBasePathFix,
   injectWebpackPublicPathFix,
+  injectBannerComment,
+  minifyScript,
 } from './htmlRewriter.js';
 import { rewriteCss } from './cssRewriter.js';
 import { rewriteJs } from './jsRewriter.js';
@@ -20,6 +22,8 @@ export {
   injectVersionScript,
   injectBasePathFix,
   injectWebpackPublicPathFix,
+  injectBannerComment,
+  minifyScript,
   rewriteCss,
   rewriteJs,
   createUrlMap,

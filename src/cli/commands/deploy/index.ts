@@ -16,6 +16,7 @@ import { config as envConfig } from '../../../lib/config.js';
 import { formatError } from '../../../utils/errors.js';
 import { MANIFEST_FILENAME } from '../../../utils/constants.js';
 import { readManifestData, saveDeploymentEnv, displaySummary } from '../../utils.js';
+import { setDebugMode } from '../../../utils/logger.js';
 import {
   detectCliArguments,
   promptBuildReminder,
@@ -52,6 +53,7 @@ export function registerDeployCommand(program: Command): void {
     .option('-s, --sats-per-kb <number>', 'Satoshis per KB for fees', String(envConfig.satsPerKb))
     .option('-m, --manifest <file>', 'Output manifest file', envConfig.manifestFile)
     .option('--dry-run', 'Simulate deployment without broadcasting transactions', envConfig.dryRun)
+    .option('--debug', 'Enable debug logging for verbose output', false)
     .option(
       '--ordinal-content-url <url>',
       'Ordinal content delivery URL',
@@ -80,6 +82,11 @@ export function registerDeployCommand(program: Command): void {
     )
     .action(async (options) => {
       try {
+        // Set debug mode if flag is present
+        if (options.debug) {
+          setDebugMode(true);
+        }
+
         // Phase 1: Detect CLI arguments & pre-flight checks
         const cliFlags = detectCliArguments();
 

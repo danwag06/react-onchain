@@ -6,12 +6,20 @@
  *
  * Values replaced during injection:
  * - VERSION_INSCRIPTION_ORIGIN: The origin outpoint of the versioning inscription
+ *
+ * Debug mode: Add ?debug=true to URL to enable console logging
  */
 (function () {
   const VERSION_INSCRIPTION_ORIGIN = '__VERSION_INSCRIPTION_ORIGIN__';
 
   const params = new URLSearchParams(window.location.search);
   const requestedVersion = params.get('version');
+  const DEBUG = params.get('debug') === 'true';
+
+  // Debug logger - only logs if ?debug=true
+  const log = DEBUG ? console.log.bind(console) : () => {};
+  const warn = DEBUG ? console.warn.bind(console) : () => {};
+  const error = console.error.bind(console); // Errors always shown
 
   /**
    * Sets the base path for the application after version resolution
@@ -41,7 +49,7 @@
       return basePath;
     };
 
-    console.log('[react-onchain] Base path configured:', basePath);
+    log('[react-onchain] Base path configured:', basePath);
   }
 
   /**
@@ -53,7 +61,7 @@
     try {
       // Use relative path for querying latest inscription
       const url = `/content/${VERSION_INSCRIPTION_ORIGIN}?seq=-1&map=true`;
-      console.log('[react-onchain] Fetching latest version metadata from:', url);
+      log('[react-onchain] Fetching latest version metadata from:', url);
 
       //TODO: use method head to get the headers only and fix other places that call this endpoint
       const response = await fetch(url);
@@ -71,32 +79,32 @@
 
       // Parse JSON metadata
       const metadata = JSON.parse(mapHeader);
-      console.log('[react-onchain] Version metadata loaded:', metadata);
+      log('[react-onchain] Version metadata loaded:', metadata);
 
       // Get current outpoint from URL
       // Extract outpoint using pattern matching: /content/{txid}_{vout}/... → {txid}_{vout}
       const currentPath = window.location.pathname;
       const outpointMatch = currentPath.match(/^\/content\/([a-f0-9]{64}_\d+)/);
       const currentOutpoint = outpointMatch ? outpointMatch[1] : '';
-      console.log('[react-onchain] Current outpoint:', currentOutpoint);
+      log('[react-onchain] Current outpoint:', currentOutpoint);
 
       let targetOutpoint = null;
 
       // STEP 1: Check if specific version requested
       if (requestedVersion) {
-        console.log('[react-onchain] Resolving requested version:', requestedVersion);
+        log('[react-onchain] Resolving requested version:', requestedVersion);
 
         // Look up version in metadata (format: version.X.X.X)
         const versionKey = `version.${requestedVersion}`;
         const versionData = metadata[versionKey];
 
         if (!versionData) {
-          console.warn('[react-onchain] Version', requestedVersion, 'not found in metadata');
+          warn('[react-onchain] Version', requestedVersion, 'not found in metadata');
           // Extract available versions from metadata keys
           const availableVersions = Object.keys(metadata)
             .filter(k => k.startsWith('version.'))
             .map(k => k.replace('version.', ''));
-          console.log('[react-onchain] Available versions:', availableVersions);
+          log('[react-onchain] Available versions:', availableVersions);
           return;
         }
 
@@ -104,14 +112,14 @@
         try {
           const versionMetadata = JSON.parse(versionData);
           targetOutpoint = versionMetadata.outpoint;
-          console.log('[react-onchain] Found outpoint for version', requestedVersion, ':', targetOutpoint);
+          log('[react-onchain] Found outpoint for version', requestedVersion, ':', targetOutpoint);
         } catch (error) {
-          console.error('[react-onchain] Failed to parse version metadata:', error);
+          error('[react-onchain] Failed to parse version metadata:', error);
           return;
         }
       } else {
         // STEP 2: No version param - check if latest is different from current
-        console.log('[react-onchain] No version param - checking if latest differs from current');
+        log('[react-onchain] No version param - checking if latest differs from current');
 
         // Parse all version entries from metadata
         const versionEntries = [];
@@ -125,13 +133,13 @@
                 timestamp: versionData.utcTimeStamp || 0,
               });
             } catch (error) {
-              console.warn('[react-onchain] Failed to parse version entry:', key, error);
+              warn('[react-onchain] Failed to parse version entry:', key, error);
             }
           }
         }
 
         if (versionEntries.length === 0) {
-          console.log('[react-onchain] No versions found in metadata - staying on current page');
+          log('[react-onchain] No versions found in metadata - staying on current page');
           return;
         }
 
@@ -139,12 +147,12 @@
         versionEntries.sort((a, b) => b.timestamp - a.timestamp);
         const latestVersion = versionEntries[0];
 
-        console.log('[react-onchain] Latest version:', latestVersion.version, 'at', latestVersion.outpoint);
-        console.log('[react-onchain] Current outpoint:', currentOutpoint);
+        log('[react-onchain] Latest version:', latestVersion.version, 'at', latestVersion.outpoint);
+        log('[react-onchain] Current outpoint:', currentOutpoint);
 
         // Check if we're already on the latest version
         if (latestVersion.outpoint === currentOutpoint) {
-          console.log('[react-onchain] Already on latest version');
+          log('[react-onchain] Already on latest version');
           // Log the current version info
           console.log(`%c[react-onchain] Version: ${latestVersion.version} | Deployment: /content/${currentOutpoint}`, 'color: #22c55e; font-weight: bold');
           // Set base path for this final outpoint
@@ -154,12 +162,12 @@
 
         // Redirect to latest version
         targetOutpoint = latestVersion.outpoint;
-        console.log('[react-onchain] Will redirect to latest version');
+        log('[react-onchain] Will redirect to latest version');
       }
 
       // STEP 3: Perform redirect if needed
       if (targetOutpoint && targetOutpoint !== currentOutpoint) {
-        console.log('[react-onchain] Redirecting to:', targetOutpoint);
+        log('[react-onchain] Redirecting to:', targetOutpoint);
 
         // Extract the path after the current outpoint (e.g., /about-us from /content/abc_0/about-us)
         const currentPathAfterOutpoint = currentPath.replace(`/content/${currentOutpoint}`, '');
@@ -167,10 +175,10 @@
         // Build redirect URL preserving the subpath, query params, and hash
         const newUrl = `/content/${targetOutpoint}${currentPathAfterOutpoint}${window.location.search}${window.location.hash}`;
 
-        console.log('[react-onchain] Preserving path:', currentPathAfterOutpoint);
+        log('[react-onchain] Preserving path:', currentPathAfterOutpoint);
         window.location.href = newUrl;
       } else if (targetOutpoint === currentOutpoint) {
-        console.log('[react-onchain] Already on the target version');
+        log('[react-onchain] Already on the target version');
         // Find version number for current outpoint
         let currentVersionNumber = 'unknown';
         for (const key in metadata) {
@@ -191,8 +199,8 @@
         setBasePath(currentOutpoint);
       }
     } catch (error) {
-      console.error('[react-onchain] Version redirect failed:', error);
-      console.error('[react-onchain] Staying on current version');
+      error('[react-onchain] Version redirect failed:', error);
+      error('[react-onchain] Staying on current version');
       // Log deployment path even if version fetch failed
       const currentPath = window.location.pathname;
       const outpointMatch = currentPath.match(/^\/content\/([a-f0-9]{64}_\d+)/);

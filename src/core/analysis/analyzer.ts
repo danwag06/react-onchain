@@ -5,7 +5,7 @@ import type { FileReference, DependencyNode, CONTENT_TYPES } from './analyzer.ty
 import { formatError } from '../../utils/errors.js';
 import { shouldSkipUrl, createAssetPathPattern, resolveAssetPath } from '../utils.js';
 
-const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
+export const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
   '.html': 'text/html',
   '.htm': 'text/html',
   '.css': 'text/css',
@@ -292,6 +292,7 @@ function extractCssReferences(content: string, baseDir: string, filePath: string
 function extractJsReferences(content: string, baseDir: string, filePath: string): string[] {
   const references: string[] = [];
   const fileDir = dirname(filePath);
+  const relativeFilePath = relative(baseDir, filePath);
 
   // Match import statements and dynamic imports
   const patterns = [
@@ -398,7 +399,7 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
   while ((match = assetPattern.exec(content)) !== null) {
     const ref = match[1];
     // Use shared resolution logic
-    const relativePath = resolveAssetPath(ref, filePath, baseDir);
+    const relativePath = resolveAssetPath(ref, relativeFilePath, baseDir);
     const resolvedPath = join(baseDir, relativePath);
     references.push(resolvedPath);
   }

@@ -12,9 +12,20 @@
  * - With n.p="https://": "https://" + "/content/abc_0" = "https:///content/abc_0" ❌ (invalid)
  *
  * This must run BEFORE any webpack bundles are loaded.
+ *
+ * Debug mode: Add ?debug=true to URL to enable console logging
  */
 (function () {
   'use strict';
+
+  // Always show deployment attribution
+  console.log('🚀 Deployed with https://reactonchain.com');
+
+  // Debug logger - only logs if ?debug=true
+  const params = new URLSearchParams(window.location.search);
+  const DEBUG = params.get('debug') === 'true';
+  const log = DEBUG ? console.log.bind(console) : () => {};
+  const error = console.error.bind(console); // Errors always shown
 
   try {
     // Set webpack's public path to empty string
@@ -34,14 +45,14 @@
         },
         set: function (value) {
           // Ignore any attempts to override this
-          console.log('[react-onchain] Preventing webpack public path override:', value);
+          log('[react-onchain] Preventing webpack public path override:', value);
         },
         configurable: false,
       });
     }
 
-    console.log('[react-onchain] Webpack public path set to "" (empty string)');
+    log('[react-onchain] Webpack public path set to "" (empty string)');
   } catch (error) {
-    console.error('[react-onchain] Error setting webpack public path:', error);
+    error('[react-onchain] Error setting webpack public path:', error);
   }
 })();

@@ -24,6 +24,8 @@ import {
   injectVersionScript,
   injectBasePathFix,
   injectWebpackPublicPathFix,
+  injectBannerComment,
+  minifyScript,
 } from '../rewriting/index.js';
 import { shouldChunkFile, splitFileIntoChunks, createChunkManifest } from '../chunking/index.js';
 import { generateServiceWorkerRegistration } from '../service-worker/index.js';
@@ -124,6 +126,9 @@ async function prepareFileContent(
   if (isIndexHtmlFile(filePath)) {
     let htmlContent = content.toString('utf-8');
 
+    // Inject banner comment (at the very top)
+    htmlContent = injectBannerComment(htmlContent);
+
     // Inject webpack public path fix (MUST run FIRST, before any webpack bundles load)
     htmlContent = await injectWebpackPublicPathFix(htmlContent);
 
@@ -139,16 +144,25 @@ async function prepareFileContent(
     // Must be in <head> so window.swReady is available before body scripts execute
     if (serviceWorkerUrl) {
       const swRegistration = generateServiceWorkerRegistration(serviceWorkerUrl);
-      // Inject before closing </head> tag, or before </body> if no head
-      if (htmlContent.includes('</head>')) {
-        htmlContent = htmlContent.replace('</head>', `${swRegistration}\n</head>`);
-      } else if (htmlContent.includes('</body>')) {
-        htmlContent = htmlContent.replace('</body>', `${swRegistration}\n</body>`);
-      } else if (htmlContent.includes('</html>')) {
-        htmlContent = htmlContent.replace('</html>', `${swRegistration}\n</html>`);
-      } else {
-        // Fallback: append at end
-        htmlContent += '\n' + swRegistration;
+
+      // Extract script content (between <script> tags) and minify it
+      const scriptMatch = swRegistration.match(/<script>([\s\S]*)<\/script>/);
+      if (scriptMatch) {
+        const scriptContent = scriptMatch[1];
+        const minified = minifyScript(scriptContent);
+        const minifiedScript = `\n<script>${minified}</script>\n`;
+
+        // Inject before closing </head> tag, or before </body> if no head
+        if (htmlContent.includes('</head>')) {
+          htmlContent = htmlContent.replace('</head>', `${minifiedScript}</head>`);
+        } else if (htmlContent.includes('</body>')) {
+          htmlContent = htmlContent.replace('</body>', `${minifiedScript}</body>`);
+        } else if (htmlContent.includes('</html>')) {
+          htmlContent = htmlContent.replace('</html>', `${minifiedScript}</html>`);
+        } else {
+          // Fallback: append at end
+          htmlContent += minifiedScript;
+        }
       }
     }
 

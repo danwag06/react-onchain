@@ -96,6 +96,28 @@ export const RETRY_INITIAL_DELAY_MS = 2000;
 export const RETRY_MAX_DELAY_MS = 30000;
 
 // ============================================================================
+// Static Utility Scripts (Permanent Inscriptions)
+// ============================================================================
+
+/**
+ * Webpack Public Path Fix Script
+ * Sets __webpack_public_path__ to empty string before webpack bundles load
+ * This prevents webpack from breaking inscription URL concatenation
+ * Includes attribution log and debug mode support
+ */
+export const STATIC_WEBPACK_FIX_OUTPOINT =
+  '250b354d57c6d1fe7ed955e0afba9bbc6bc78521271d41090f3449668b2cdd09_0';
+
+/**
+ * Base Path Fix Script
+ * Detects content provider deployment paths and sets up <base> tag
+ * Configures window.__REACT_ONCHAIN_BASE__ for React Router
+ * Includes debug mode support
+ */
+export const STATIC_BASE_PATH_FIX_OUTPOINT =
+  '3a8b559790a25684e5c5e61da34522710925b595aff0fb7f42e3ab3637b2b429_0';
+
+// ============================================================================
 // Mock Values (for dry-run mode)
 // ============================================================================
 
