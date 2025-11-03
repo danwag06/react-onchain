@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { writeFile, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
-import { analyzeBuildDirectory } from '../analyzer.js';
+import { analyzeBuildDirectory } from '../core/analysis/index.js';
 import { tmpdir } from 'os';
 
 // Helper to create a temporary test directory
@@ -851,12 +851,11 @@ describe('Edge Cases and Integration', () => {
     await createTestFile(testDir, 'doc.html', '<html></html>');
 
     const result = await analyzeBuildDirectory(testDir);
-    const indexFile = result.files.find((f) => f.originalPath === 'index.html');
 
     // Hash fragments in href for navigation shouldn't be treated as dependencies
     // (current implementation doesn't extract <a href>, so this should be empty or not include it)
     // This test documents current behavior
-    assert.ok(true, 'Test for hash fragment handling');
+    assert.ok(result.files.length > 0, 'Test for hash fragment handling');
   });
 
   it('should remove duplicate dependencies', async () => {

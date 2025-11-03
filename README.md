@@ -29,14 +29,14 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 
 ## Decentralized Architecture
 
-`react-onchain` is fully open source and decentralized. Anyone can add support for additional indexers and content providers by implementing the service interfaces in `src/services/`.
+`react-onchain` is fully open source and decentralized. Anyone can add support for additional indexers and content providers by implementing the service interfaces in `src/lib/service-providers/`.
 
 - **Pluggable Indexers**: Add new blockchain indexing services
 - **Multiple Content Providers**: Support for multiple ordinals content delivery networks
 - **Service Failover**: Automatic failover between available providers
 - **Community Driven**: Contribute new providers via pull requests
 
-See `src/services/IndexerService.ts` for the base interface and `src/services/gorilla-pool/` for a reference implementation.
+See `src/lib/service-providers/IndexerService.ts` for the base interface and `src/lib/service-providers/gorilla-pool/` for a reference implementation.
 
 ## Installation
 
@@ -218,16 +218,20 @@ The CLI auto-loads everything from `.env` and only prompts for the new version i
 
 For automation or CI/CD pipelines, you can bypass interactive prompts using flags:
 
-| Flag                                         | Alias | Description                                                  | Default  |
-| -------------------------------------------- | ----- | ------------------------------------------------------------ | -------- |
-| `--build-dir <directory>`                    | `-b`  | Build directory to deploy                                    | `./dist` |
-| `--payment-key <wif>`                        | `-p`  | Payment private key in WIF format (destination auto-derived) | Prompted |
-| `--sats-per-kb <number>`                     | `-s`  | Satoshis per KB for fees                                     | `1`      |
-| `--dry-run`                                  |       | Test deployment without broadcasting                         | `false`  |
-| `--version-tag <string>`                     |       | Version identifier (e.g., "1.0.0")                           | Prompted |
-| `--version-description <string>`             |       | Changelog or release notes                                   | Prompted |
-| `--versioning-origin-inscription <outpoint>` |       | Existing versioning inscription origin                       | Auto     |
-| `--app-name <string>`                        |       | Application name for new versioning inscription              | Prompted |
+| Flag                             | Alias | Description                                                  | Default  |
+| -------------------------------- | ----- | ------------------------------------------------------------ | -------- |
+| `--build-dir <directory>`        | `-b`  | Build directory to deploy                                    | `./dist` |
+| `--payment-key <wif>`            | `-p`  | Payment private key in WIF format (destination auto-derived) | Prompted |
+| `--sats-per-kb <number>`         | `-s`  | Satoshis per KB for fees                                     | `1`      |
+| `--dry-run`                      |       | Test deployment without broadcasting                         | `false`  |
+| `--version-tag <string>`         |       | Version identifier (e.g., "1.0.0")                           | Prompted |
+| `--version-description <string>` |       | Changelog or release notes                                   | Prompted |
+| `--app-name <string>`            |       | Application name for new versioning inscription              | Prompted |
+| `--change <address>`             | `-c`  | Change address (optional, for UTXO change outputs)           | Auto     |
+| `--manifest <file>`              | `-m`  | Output manifest file path                                    | Auto     |
+| `--ordinal-content-url <url>`    |       | Ordinal content delivery URL                                 | Auto     |
+| `--ordinal-indexer-url <url>`    |       | Ordinal indexer API URL                                      | Auto     |
+| `--chunk-batch-size <number>`    |       | Number of chunks to inscribe in parallel per batch           | `10`     |
 
 **Automated deployment example:**
 
@@ -451,14 +455,18 @@ npx react-onchain version:info <VERSION> [INSCRIPTION_ORIGIN]
 npx react-onchain version:summary [INSCRIPTION_ORIGIN]
 ```
 
-**Advanced: Versioning CLI flags** (for automation/CI-CD):
+**Advanced: Version Command Options:**
 
-| Flag                                         | Description                                      |
-| -------------------------------------------- | ------------------------------------------------ |
-| `--version-tag <string>`                     | Version identifier (e.g., "1.0.0")               |
-| `--version-description <string>`             | Changelog or release notes                       |
-| `--versioning-origin-inscription <outpoint>` | Existing inscription origin (subsequent deploys) |
-| `--app-name <string>`                        | Application name (for first deployment)          |
+All version commands (`version:history`, `version:info`, `version:summary`) support:
+
+| Flag                           | Description                                               |
+| ------------------------------ | --------------------------------------------------------- |
+| `-m, --manifest <file>`        | Path to manifest file (default: deployment-manifest.json) |
+| `-l, --limit <number>`         | Limit number of versions to display (history only)        |
+| `-f, --from-version <version>` | Start displaying from a specific version (history only)   |
+| `-a, --all`                    | Show all versions, ignores limit (history only)           |
+
+**Note:** Versioning inscription origin is auto-loaded from the manifest file. All commands accept an optional `[inscription]` positional argument to override.
 
 ## Deployment Manifest
 
@@ -577,30 +585,97 @@ Typical costs at 1 sat/KB:
 
 ## Architecture
 
+`react-onchain` uses a **domain-driven modular architecture** organized by business capability:
+
 ```
 react-onchain/
 ├── src/
-│   ├── services/
-│   │   ├── gorilla-pool/                 # GorillaPool indexer implementation
-│   │   │   ├── indexer.ts
-│   │   │   └── constants.ts
-│   │   ├── IndexerService.ts             # Indexer abstraction interface
-│   │   └── index.ts                      # Service exports
-│   ├── analyzer.ts                       # Build analysis & dependency graph
-│   ├── cli.ts                            # Command-line interface
-│   ├── config.ts                         # Configuration management
-│   ├── inscriber.ts                      # Blockchain inscription handler
-│   ├── orchestrator.ts                   # Deployment orchestration
-│   ├── rewriter.ts                       # Reference rewriting (HTML/CSS/JS)
-│   ├── retryUtils.ts                     # Retry logic with backoff
-│   ├── types.ts                          # TypeScript type definitions
-│   ├── versioningInscriptionHandler.ts   # Inscription-based versioning
-│   ├── versionRedirect.template.js       # Client-side version redirect script
-│   ├── basePathFix.template.js           # React Router base path configuration
+│   ├── core/                             # Domain-based business logic
+│   │   ├── analysis/                     # Build analysis & dependency graphs
+│   │   │   ├── analyzer.ts
+│   │   │   ├── analyzer.types.ts
+│   │   │   └── index.ts
+│   │   ├── chunking/                     # File chunking for large files
+│   │   │   ├── chunker.ts
+│   │   │   ├── chunking.types.ts
+│   │   │   └── index.ts
+│   │   ├── inscription/                  # Blockchain inscription operations
+│   │   │   ├── parallelInscriber.ts
+│   │   │   ├── utxoSplitter.ts
+│   │   │   ├── inscription.types.ts
+│   │   │   ├── utils.ts
+│   │   │   └── index.ts
+│   │   ├── orchestration/                # Wave-based deployment coordination
+│   │   │   ├── orchestrator.ts
+│   │   │   ├── jobBuilder.ts
+│   │   │   ├── orchestration.types.ts
+│   │   │   └── index.ts
+│   │   ├── rewriting/                    # URL rewriting (HTML/CSS/JS)
+│   │   │   ├── htmlRewriter.ts
+│   │   │   ├── cssRewriter.ts
+│   │   │   ├── jsRewriter.ts
+│   │   │   ├── utils.ts
+│   │   │   ├── templates/
+│   │   │   │   ├── versionRedirect.template.js
+│   │   │   │   └── basePathFix.template.js
+│   │   │   └── index.ts
+│   │   ├── versioning/                   # On-chain version management
+│   │   │   ├── versioningHandler.ts
+│   │   │   ├── versioning.types.ts
+│   │   │   ├── utils.ts
+│   │   │   └── index.ts
+│   │   ├── service-worker/               # Service worker generation
+│   │   │   ├── generator.ts
+│   │   │   ├── types.ts
+│   │   │   ├── ChunkFetcher.ts
+│   │   │   ├── RangeCalculator.ts
+│   │   │   ├── StreamAssembler.ts
+│   │   │   └── index.ts
+│   │   └── utils.ts                      # Shared core utilities
+│   ├── lib/                              # Configuration & services
+│   │   ├── config.ts                     # Environment & configuration
+│   │   └── service-providers/
+│   │       ├── IndexerService.ts         # Indexer abstraction
+│   │       ├── gorilla-pool/
+│   │       │   ├── indexer.ts
+│   │       │   └── constants.ts
+│   │       └── index.ts
+│   ├── cli/                              # Command-line interface
+│   │   ├── cli.ts                        # CLI entry point
+│   │   ├── utils.ts
+│   │   └── commands/
+│   │       ├── deploy/
+│   │       │   ├── index.ts
+│   │       │   ├── input.ts
+│   │       │   ├── display.ts
+│   │       │   └── progress.ts
+│   │       ├── version/
+│   │       │   ├── index.ts
+│   │       │   └── display.ts
+│   │       └── manifest/
+│   │           ├── index.ts
+│   │           └── display.ts
+│   ├── utils/                            # Shared utilities
+│   │   ├── constants.ts
+│   │   ├── errors.ts
+│   │   ├── errorLogger.ts
+│   │   └── retry.ts
+│   ├── tests/                            # Test suite
+│   │   ├── analyzer.test.ts
+│   │   ├── chunker.test.ts
+│   │   └── sw-local-test.ts
 │   └── index.ts                          # Public API exports
 ├── dist/                                 # Compiled JavaScript
 └── package.json
 ```
+
+**Key Architecture Patterns:**
+
+- **Domain-Driven Design**: Each domain is self-contained with types, logic, and utilities
+- **Barrel Exports**: Clean public APIs via `index.ts` files in each domain
+- **Type Co-location**: Domain-specific types in `.types.ts` files
+- **Service Abstraction**: Pluggable indexer providers via `IndexerService` interface
+- **Wave-Based Parallelization**: Efficient dependency-aware parallel inscription
 
 ## Requirements
 

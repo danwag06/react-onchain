@@ -15,9 +15,9 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { createServer } from 'http';
 import { createHash } from 'crypto';
-import { splitFileIntoChunks } from '../chunker.js';
-import { generateChunkReassemblyServiceWorker } from '../serviceWorkerGenerator.js';
-import type { ChunkManifest } from '../types.js';
+import { splitFileIntoChunks } from '../core/chunking/index.js';
+import { generateChunkReassemblyServiceWorker } from '../core/service-worker/index.js';
+import type { ChunkManifest } from '../core/chunking/index.js';
 
 const TEST_VIDEO_PATH = join(process.cwd(), 'video-test/video.mp4');
 const TEST_OUTPUT_DIR = join(process.cwd(), '.test-sw-output');

@@ -36,10 +36,10 @@ function sleep(ms: number): Promise<void> {
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options: RetryOptions = {},
-  shouldRetry?: (error: any, attempt: number) => boolean
+  shouldRetry?: (error: unknown, attempt: number) => boolean
 ): Promise<T> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  let lastError: any;
+  let lastError: unknown;
   let delay = opts.initialDelayMs;
 
   for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
@@ -78,7 +78,7 @@ export async function retryWithBackoff<T>(
 /**
  * Check if an error is related to UTXO not being found
  */
-export function isUtxoNotFoundError(error: any): boolean {
+export function isUtxoNotFoundError(error: unknown): boolean {
   const errorMsg = formatError(error);
   const lowerMsg = errorMsg.toLowerCase();
 
@@ -94,7 +94,7 @@ export function isUtxoNotFoundError(error: any): boolean {
 /**
  * Determine if an error should trigger a retry
  */
-export function shouldRetryError(error: any, attempt: number): boolean {
+export function shouldRetryError(error: unknown, _attempt: number): boolean {
   const errorMsg = formatError(error);
   const lowerMsg = errorMsg.toLowerCase();
 

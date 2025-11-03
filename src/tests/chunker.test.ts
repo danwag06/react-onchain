@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { shouldChunkFile, splitFileIntoChunks, createChunkManifest } from '../chunker.js';
-import type { InscribedFile } from '../types.js';
 import {
-  PROGRESSIVE_VIDEO_CHUNK_SIZES,
-  PROGRESSIVE_VIDEO_MAX_CHUNK_SIZE,
-} from '../utils/constants.js';
+  shouldChunkFile,
+  splitFileIntoChunks,
+  createChunkManifest,
+} from '../core/chunking/index.js';
+import type { InscribedFile } from '../core/inscription/index.js';
 
 describe('Chunker Module', () => {
   describe('shouldChunkFile', () => {

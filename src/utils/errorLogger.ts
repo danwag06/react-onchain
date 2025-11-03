@@ -35,13 +35,13 @@ function getTimestamp(): string {
  * @returns Path to the log file
  */
 export async function logError(
-  error: any,
+  error: unknown,
   context: {
     operation?: string;
-    txData?: any;
-    utxoStates?: any;
-    networkResponse?: any;
-    additionalInfo?: any;
+    txData?: unknown;
+    utxoStates?: unknown;
+    networkResponse?: unknown;
+    additionalInfo?: unknown;
   } = {}
 ): Promise<string> {
   const logsDir = await ensureLogsDir();
@@ -58,7 +58,9 @@ export async function logError(
     '-'.repeat(70),
     `Message: ${formatError(error)}`,
     '',
-    error.stack ? `Stack Trace:\n${error.stack}` : 'No stack trace available',
+    error instanceof Error && 'stack' in error
+      ? `Stack Trace:\n${error.stack}`
+      : 'No stack trace available',
     '',
   ];
 
@@ -107,12 +109,4 @@ export async function logError(
   await writeFile(logFile, logContent.join('\n'), 'utf-8');
 
   return logFile;
-}
-
-/**
- * Clean old log files (keep last 10)
- */
-export async function cleanOldLogs(): Promise<void> {
-  // TODO: Implement log file cleanup
-  // This is optional and can be added later
 }

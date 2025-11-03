@@ -16,12 +16,12 @@
     "js-1sat-ord"
   ],
   "scripts": {
-    "build": "tsc && cp src/versionRedirect.template.js dist/ && cp src/basePathFix.template.js dist/ && npm run lint",
+    "build": "tsc && mkdir -p dist/core/rewriting/templates && cp src/core/rewriting/templates/versionRedirect.template.js dist/core/rewriting/templates/ && cp src/core/rewriting/templates/basePathFix.template.js dist/core/rewriting/templates/ && npm run lint",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "test": "npm run build && node --test dist/tests/analyzer.test.js",
     "test:sw-local": "npm run build && node dist/tests/sw-local-test.js",
-    "lint": "eslint --fix 'src/**/*.ts' && prettier --write \"src/**/*.ts\" \"*.md\" \"*.json\"",
+    "lint": "eslint --fix 'src/**/*.ts' && npm run format",
     "format": "prettier --write \"src/**/*.ts\" \"*.md\" \"*.json\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"*.md\" \"*.json\""
   },
