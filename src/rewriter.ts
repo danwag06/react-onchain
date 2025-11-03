@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from './types.js';
-import type { BrowserIndexerConfig } from './services/IndexerService.js';
+import type { BrowserIndexerConfig } from './service-providers/IndexerService.js';
 import { formatError } from './utils/errors.js';
 import { shouldSkipUrl } from './utils/url.js';
 

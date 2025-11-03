@@ -7,8 +7,7 @@ deployment-manifest-dry-run.json
 test-app/
 .claude
 .test-sw-output/
-video-test/
-blah-test/
+local-test-apps/
 
 # Environment variables (may contain sensitive keys)
 .env*

@@ -9,7 +9,7 @@ import type { PrivateKey } from '@bsv/sdk';
 import { createOrdinals, sendOrdinals, Utxo } from 'js-1sat-ord';
 import { createIndexer } from './config.js';
 import { retryWithBackoff, shouldRetryError } from './utils/retry.js';
-import { IndexerService } from './services/IndexerService.js';
+import { IndexerService } from './service-providers/IndexerService.js';
 import { formatError } from './utils/errors.js';
 import { getManifestLatestVersion } from './utils/helpers.js';
 import { MANIFEST_FILENAME } from './utils/constants.js';

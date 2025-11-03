@@ -32,12 +32,12 @@
 
 import { PrivateKey, Transaction, SatoshisPerKilobyte, P2PKH, Utils, OP, Script } from '@bsv/sdk';
 import type { Utxo } from 'js-1sat-ord';
-import type { IndexerService } from './services/IndexerService.js';
+import type { IndexerService } from './service-providers/IndexerService.js';
 import type { InscribedFile } from './types.js';
 import { createOrdinals, B_PREFIX } from 'js-1sat-ord';
 import { splitUtxoForParallelInscription } from './utxoSplitter.js';
 import { INSCRIPTION_OUTPUT_SATS } from './utils/constants.js';
-import { CONTENT_PATH } from './services/gorilla-pool/constants.js';
+import { CONTENT_PATH } from './service-providers/gorilla-pool/constants.js';
 import { addUtxoInput } from './utils/helpers.js';
 import { createHash } from 'crypto';
 import { retryWithBackoff, shouldRetryError } from './utils/retry.js';

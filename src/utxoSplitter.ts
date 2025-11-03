@@ -1,6 +1,6 @@
 import { PrivateKey, Transaction, P2PKH, SatoshisPerKilobyte, Utils } from '@bsv/sdk';
 import type { Utxo } from 'js-1sat-ord';
-import type { IndexerService } from './services/IndexerService.js';
+import type { IndexerService } from './service-providers/IndexerService.js';
 import { retryWithBackoff } from './utils/retry.js';
 import {
   INSCRIPTION_OUTPUT_SATS,

@@ -1,10 +1,10 @@
 import dotenv from 'dotenv';
-import { GorillaPoolIndexer } from './services/gorilla-pool/indexer.js';
-import type { IndexerService, BrowserIndexerConfig } from './services/IndexerService.js';
+import { GorillaPoolIndexer } from './service-providers/gorilla-pool/indexer.js';
+import type { IndexerService, BrowserIndexerConfig } from './service-providers/IndexerService.js';
 import {
   GORILLA_POOL_CONTENT_URL,
   GORILLA_POOL_INDEXER_URL,
-} from './services/gorilla-pool/constants.js';
+} from './service-providers/gorilla-pool/constants.js';
 
 // Load environment variables from .env file (if it exists)
 dotenv.config();
