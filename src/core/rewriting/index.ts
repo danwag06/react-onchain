@@ -4,13 +4,26 @@
  */
 
 import { readFile } from 'fs/promises';
-import { rewriteHtml, injectVersionScript, injectBasePathFix } from './htmlRewriter.js';
+import {
+  rewriteHtml,
+  injectVersionScript,
+  injectBasePathFix,
+  injectWebpackPublicPathFix,
+} from './htmlRewriter.js';
 import { rewriteCss } from './cssRewriter.js';
 import { rewriteJs } from './jsRewriter.js';
 import { createUrlMap } from './utils.js';
 
 // Re-export individual rewriters
-export { rewriteHtml, injectVersionScript, injectBasePathFix, rewriteCss, rewriteJs, createUrlMap };
+export {
+  rewriteHtml,
+  injectVersionScript,
+  injectBasePathFix,
+  injectWebpackPublicPathFix,
+  rewriteCss,
+  rewriteJs,
+  createUrlMap,
+};
 
 /**
  * Rewrites file content based on file type

@@ -3,8 +3,8 @@
  * Shared utilities for URL rewriting
  */
 
-import { dirname, relative, resolve, join } from 'path';
 import type { InscribedFile } from '../inscription/index.js';
+import { resolveAssetPath as resolveAssetPathCore } from '../utils.js';
 
 /**
  * Creates a mapping of original paths to inscription URL paths
@@ -19,16 +19,9 @@ export function createUrlMap(inscriptions: InscribedFile[]): Map<string, string>
 
 /**
  * Resolves a reference path relative to a source file
+ * @deprecated Use resolveAssetPath from core/utils.js instead
+ * This is kept for backward compatibility but delegates to the shared implementation
  */
 export function resolveReference(ref: string, sourceFile: string, baseDir: string): string {
-  const sourceDir = dirname(join(baseDir, sourceFile));
-
-  if (ref.startsWith('/')) {
-    // Absolute path from build root
-    return ref.substring(1);
-  } else {
-    // Relative path
-    const resolved = resolve(sourceDir, ref);
-    return relative(baseDir, resolved);
-  }
+  return resolveAssetPathCore(ref, sourceFile, baseDir);
 }

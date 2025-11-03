@@ -374,6 +374,13 @@ export async function deployToChain(
 
   // Step 5: Process files wave by wave
   const urlMap = new Map<string, string>();
+  // Pre-populate URL map with ALL cached files before any wave processing
+  // This ensures that files being rewritten can reference cached files from any wave
+  for (const [filePath, previousInscription] of previousInscriptions) {
+    if (cachedFiles.includes(filePath)) {
+      urlMap.set(filePath, previousInscription.urlPath);
+    }
+  }
   const inscriptions: InscribedFile[] = [];
   const allChunkManifests: ChunkManifest[] = [];
   // Initialize with cached chunk manifests

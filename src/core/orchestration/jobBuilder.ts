@@ -19,7 +19,12 @@ import { readFile } from 'fs/promises';
 import type { InscriptionJob, InscriptionResult, InscribedFile } from '../inscription/index.js';
 import type { FileReference, DependencyNode } from '../analysis/index.js';
 import type { ChunkManifest } from '../chunking/index.js';
-import { rewriteFile, injectVersionScript, injectBasePathFix } from '../rewriting/index.js';
+import {
+  rewriteFile,
+  injectVersionScript,
+  injectBasePathFix,
+  injectWebpackPublicPathFix,
+} from '../rewriting/index.js';
 import { shouldChunkFile, splitFileIntoChunks, createChunkManifest } from '../chunking/index.js';
 import { generateServiceWorkerRegistration } from '../service-worker/index.js';
 import { isIndexHtmlFile } from '../inscription/index.js';
@@ -118,6 +123,9 @@ async function prepareFileContent(
   // Special handling for index.html
   if (isIndexHtmlFile(filePath)) {
     let htmlContent = content.toString('utf-8');
+
+    // Inject webpack public path fix (MUST run FIRST, before any webpack bundles load)
+    htmlContent = await injectWebpackPublicPathFix(htmlContent);
 
     // Inject base path fix script (MUST run before React loads)
     htmlContent = await injectBasePathFix(htmlContent);

@@ -3,7 +3,7 @@ import { join, extname, relative, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { FileReference, DependencyNode, CONTENT_TYPES } from './analyzer.types.js';
 import { formatError } from '../../utils/errors.js';
-import { shouldSkipUrl } from '../utils.js';
+import { shouldSkipUrl, createAssetPathPattern, resolveAssetPath } from '../utils.js';
 
 const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
   '.html': 'text/html',
@@ -391,17 +391,15 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
   }
 
   // Also look for string literals that might be asset paths
-  // Match patterns like "/assets/logo.png" or "./image.jpg"
-  // Expanded to include more extensions: wasm, video, audio
-  const assetPattern =
-    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|wasm|webm|mp4|m4v|mov|avi|mkv|flv|wmv|ogg|ogv|mp3|m4a|aac|oga|flac|wav))["']/gi;
+  // Uses shared pattern that handles both explicit paths and webpack-style paths
+  const assetPattern = createAssetPathPattern();
   let match;
 
   while ((match = assetPattern.exec(content)) !== null) {
     const ref = match[1];
-    const resolvedPath = ref.startsWith('/')
-      ? join(baseDir, ref.substring(1))
-      : resolve(fileDir, ref);
+    // Use shared resolution logic
+    const relativePath = resolveAssetPath(ref, filePath, baseDir);
+    const resolvedPath = join(baseDir, relativePath);
     references.push(resolvedPath);
   }
 

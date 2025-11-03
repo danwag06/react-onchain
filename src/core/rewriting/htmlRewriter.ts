@@ -20,6 +20,11 @@ const BASE_PATH_FIX_SCRIPT_PATH = join(
   './templates/basePathFix.template.js'
 );
 
+const WEBPACK_PUBLIC_PATH_FIX_SCRIPT_PATH = join(
+  import.meta.dirname || __dirname,
+  './templates/webpackPublicPathFix.template.js'
+);
+
 /**
  * Injects a script into the HTML <head> section
  * If no <head> tag exists, injects at the beginning
@@ -145,5 +150,23 @@ export async function injectBasePathFix(htmlContent: string): Promise<string> {
     htmlContent,
     BASE_PATH_FIX_SCRIPT_PATH,
     'Could not load base path fix script template'
+  );
+}
+
+/**
+ * Injects the webpack public path fix script into HTML content
+ * This script sets webpack's __webpack_public_path__ to "/" before bundles load
+ * This ensures webpack's runtime asset concatenation works correctly with inscription URLs
+ *
+ * MUST be injected BEFORE any webpack bundle scripts
+ *
+ * @param htmlContent - Original HTML content
+ * @returns Modified HTML with injected webpack public path fix script
+ */
+export async function injectWebpackPublicPathFix(htmlContent: string): Promise<string> {
+  return injectScriptIntoHead(
+    htmlContent,
+    WEBPACK_PUBLIC_PATH_FIX_SCRIPT_PATH,
+    'Could not load webpack public path fix script template'
   );
 }

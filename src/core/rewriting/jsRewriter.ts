@@ -5,7 +5,7 @@
 
 import { readFile } from 'fs/promises';
 import { formatError } from '../../utils/errors.js';
-import { resolveReference } from './utils.js';
+import { createAssetPathPattern, resolveAssetPath } from '../utils.js';
 
 /**
  * Rewrites JavaScript content to use ordfs URLs
@@ -19,12 +19,12 @@ export async function rewriteJs(
   let content = await readFile(filePath, 'utf-8');
 
   // Match string literals that look like asset paths
-  const assetPattern =
-    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|css|js|mjs))["']/gi;
+  // Uses shared pattern that handles both explicit paths and webpack-style paths
+  const assetPattern = createAssetPathPattern();
 
   content = content.replace(assetPattern, (match, ref) => {
     try {
-      const resolvedPath = resolveReference(ref, originalPath, baseDir);
+      const resolvedPath = resolveAssetPath(ref, originalPath, baseDir);
       const contentUrl = urlMap.get(resolvedPath);
 
       if (contentUrl) {
@@ -39,11 +39,22 @@ export async function rewriteJs(
     return match;
   });
 
+  // CRITICAL: Remove webpack public path concatenation
+  // Webpack bundles contain patterns like: n.p+"/content/..." or __webpack_public_path__+"/content/..."
+  // We need to remove the concatenation to get just: "/content/..."
+  // This must run AFTER the asset pattern replacement above
+  const webpackConcatPattern =
+    /(\w+\.p|\w+\.__webpack_public_path__|\b__webpack_public_path__)\s*\+\s*(["']\/content\/[a-f0-9]{64}_\d+["'])/gi;
+  content = content.replace(webpackConcatPattern, (match, publicPath, url) => {
+    // Just return the URL without the webpack public path concatenation
+    return url;
+  });
+
   // Also handle import statements (though these are less common in bundled code)
   content = content.replace(/import\s+.*?from\s+["']([^"']+)["']/g, (match, ref) => {
     if (ref.startsWith('./') || ref.startsWith('../') || ref.startsWith('/')) {
       try {
-        const resolvedPath = resolveReference(ref, originalPath, baseDir);
+        const resolvedPath = resolveAssetPath(ref, originalPath, baseDir);
         const contentUrl = urlMap.get(resolvedPath);
 
         if (contentUrl) {

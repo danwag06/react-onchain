@@ -16,7 +16,10 @@
     "js-1sat-ord"
   ],
   "scripts": {
-    "build": "tsc && mkdir -p dist/core/rewriting/templates && cp src/core/rewriting/templates/versionRedirect.template.js dist/core/rewriting/templates/ && cp src/core/rewriting/templates/basePathFix.template.js dist/core/rewriting/templates/ && npm run lint",
+    "build": "tsc && mkdir -p dist/core/rewriting/templates && npm run copy:versionRedirect && npm run copy:basePathFix && npm run copy:webpackPublicPathFix && npm run lint",
+    "copy:versionRedirect": "cp src/core/rewriting/templates/versionRedirect.template.js dist/core/rewriting/templates/",
+    "copy:basePathFix": "cp src/core/rewriting/templates/basePathFix.template.js dist/core/rewriting/templates/",
+    "copy:webpackPublicPathFix": "cp src/core/rewriting/templates/webpackPublicPathFix.template.js dist/core/rewriting/templates/",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "test": "npm run build && node --test dist/tests/analyzer.test.js",
