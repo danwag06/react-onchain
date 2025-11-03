@@ -1,12 +1,12 @@
 # react-onchain
 
-**Deploy React applications entirely on the BSV blockchain.**
+**Deploy applications to the BSV blockchain.**
 
 ## Overview
 
-Your react application on-chain forever! No servers, no hosting fees, no downtime. Welcome to the decentralized web.
+Your application on-chain forever! No servers, no hosting fees, no downtime. Welcome to the decentralized web.
 
-`react-onchain` makes this a reality. It's a CLI tool that inscribes your entire React application on-chain using the BSV blockchain and [1Sat Ordinals](https://docs.1satordinals.com/readme/introduction). Every file—HTML, CSS, JavaScript, images—becomes an immutable ordinal inscription.
+`react-onchain` makes this a reality. It's a CLI tool that inscribes your entire application on-chain using the BSV blockchain and [1Sat Ordinals](https://docs.1satordinals.com/readme/introduction). Every file—HTML, CSS, JavaScript, images—becomes an immutable ordinal inscription.
 
 **The best part?** Most apps deploy for less than a penny. Your React app becomes censorship-resistant, permanently accessible, and truly decentralized—all for the cost of a fraction of a cent.
 
@@ -16,7 +16,7 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 
 ## Features
 
-- **Complete On-Chain Deployment**: Entire React app lives on the blockchain
+- **Complete On-Chain Deployment**: Entire app lives on the blockchain
 - **Automatic Dependency Resolution**: Analyzes your build and inscribes files in the correct order
 - **Reference Rewriting**: Automatically updates all file references to use ordinals content URLs
 - **Built-in Versioning**: Every deployment is versioned with unlimited history tracked on-chain
