@@ -1,6 +1,6 @@
 {
   "name": "react-onchain",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Deploy applications to the BSV blockchain.",
   "main": "dist/index.js",
   "type": "module",
@@ -42,7 +42,7 @@
   "bugs": {
     "url": "https://github.com/danwag06/react-onchain/issues"
   },
-  "homepage": "https://github.com/danwag06/react-onchain#readme",
+  "homepage": "https://reactonchain.com",
   "dependencies": {
     "@bsv/sdk": "^1.8.11",
     "@inquirer/prompts": "^7.9.0",
