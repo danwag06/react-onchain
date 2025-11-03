@@ -609,7 +609,7 @@ async function buildAndBroadcastInBatches(
     onProgress?.(`✓ Batch ${batchIndex + 1}/${batchCount} complete (${batchResults.length} txs)`);
   }
 
-  onProgress?.(`✓ All transactions completed`);
+  onProgress?.(`✓ All transactions completed. Updating versioning inscription...`);
   return results;
 }
 

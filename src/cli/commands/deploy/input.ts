@@ -98,11 +98,44 @@ export async function promptPaymentKey(dryRun: boolean): Promise<string> {
 }
 
 /**
+ * Try to read app name from package.json
+ */
+async function getAppNameFromPackageJson(buildDir: string): Promise<string | null> {
+  try {
+    const { readFile } = await import('fs/promises');
+    const { dirname, join } = await import('path');
+
+    // Try to find package.json in build dir parent or current working directory
+    const possiblePaths = [
+      join(dirname(buildDir), 'package.json'), // Parent of build dir
+      join(process.cwd(), 'package.json'), // Current working directory
+    ];
+
+    for (const pkgPath of possiblePaths) {
+      try {
+        const pkgContent = await readFile(pkgPath, 'utf-8');
+        const pkg = JSON.parse(pkgContent);
+        if (pkg.name && typeof pkg.name === 'string') {
+          return pkg.name;
+        }
+      } catch {
+        // Try next path
+        continue;
+      }
+    }
+  } catch {
+    // If any error, return null
+  }
+  return null;
+}
+
+/**
  * Prompt for app name (first deployment only)
  */
 export async function promptAppName(
   dryRun: boolean,
-  isSubsequentDeployment: boolean
+  isSubsequentDeployment: boolean,
+  buildDir?: string
 ): Promise<string> {
   if (isSubsequentDeployment) {
     // Load app name from manifest for subsequent deployments
@@ -113,10 +146,14 @@ export async function promptAppName(
     return 'DryRunApp';
   }
 
+  // Try to get app name from package.json
+  const pkgName = buildDir ? await getAppNameFromPackageJson(buildDir) : null;
+  const defaultName = pkgName || 'ReactApp';
+
   try {
     return await input({
       message: 'App name (for versioning):',
-      default: 'ReactApp',
+      default: defaultName,
     });
   } catch {
     console.error(chalk.red('\nApp name input cancelled.'));

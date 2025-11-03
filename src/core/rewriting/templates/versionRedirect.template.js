@@ -74,10 +74,10 @@
       console.log('[react-onchain] Version metadata loaded:', metadata);
 
       // Get current outpoint from URL
-      // Handle trailing slash: /content/abc_0/ → abc_0
+      // Extract outpoint using pattern matching: /content/{txid}_{vout}/... → {txid}_{vout}
       const currentPath = window.location.pathname;
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      const currentOutpoint = pathParts[pathParts.length - 1] || '';
+      const outpointMatch = currentPath.match(/^\/content\/([a-f0-9]{64}_\d+)/);
+      const currentOutpoint = outpointMatch ? outpointMatch[1] : '';
       console.log('[react-onchain] Current outpoint:', currentOutpoint);
 
       let targetOutpoint = null;
@@ -195,8 +195,8 @@
       console.error('[react-onchain] Staying on current version');
       // Log deployment path even if version fetch failed
       const currentPath = window.location.pathname;
-      const pathParts = currentPath.split('/').filter(part => part.length > 0);
-      const currentOutpoint = pathParts[pathParts.length - 1] || '';
+      const outpointMatch = currentPath.match(/^\/content\/([a-f0-9]{64}_\d+)/);
+      const currentOutpoint = outpointMatch ? outpointMatch[1] : '';
       console.log(`%c[react-onchain] Deployment: /content/${currentOutpoint}`, 'color: #ef4444; font-weight: bold');
       // Set base path even if version fetch failed
       if (currentOutpoint) {

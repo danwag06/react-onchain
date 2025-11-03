@@ -119,7 +119,11 @@ export function registerDeployCommand(program: Command): void {
         }
 
         if (!options.appName) {
-          options.appName = await promptAppName(options.dryRun, isSubsequentDeployment);
+          options.appName = await promptAppName(
+            options.dryRun,
+            isSubsequentDeployment,
+            options.buildDir
+          );
         }
 
         if (!options.versionTag) {

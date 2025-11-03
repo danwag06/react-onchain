@@ -231,7 +231,6 @@ For automation or CI/CD pipelines, you can bypass interactive prompts using flag
 | `--manifest <file>`              | `-m`  | Output manifest file path                                    | Auto     |
 | `--ordinal-content-url <url>`    |       | Ordinal content delivery URL                                 | Auto     |
 | `--ordinal-indexer-url <url>`    |       | Ordinal indexer API URL                                      | Auto     |
-| `--chunk-batch-size <number>`    |       | Number of chunks to inscribe in parallel per batch           | `10`     |
 
 **Automated deployment example:**
 

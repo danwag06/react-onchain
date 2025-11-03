@@ -23,25 +23,11 @@ export class DeploymentProgressHandler {
   }
 
   /**
-   * Create progress bar visualization
-   */
-  private createProgressBar(percent: number): string {
-    const { PROGRESS_BAR_WIDTH } = CLI_CONSTANTS;
-    const filled = Math.floor(percent / 5);
-    return '█'.repeat(filled) + '░'.repeat(PROGRESS_BAR_WIDTH - filled);
-  }
-
-  /**
    * Update overall progress spinner
    */
   private updateProgressSpinner(): void {
     if (this.completedFiles < this.totalFiles) {
-      const percent = Math.round((this.completedFiles / this.totalFiles) * 100);
-      const progressBar = this.createProgressBar(percent);
-      this.spinner.start(
-        chalk.yellow(`[${progressBar}] ${percent}% `) +
-          chalk.gray(`${this.completedFiles}/${this.totalFiles} complete`)
-      );
+      this.spinner.start(chalk.gray(`${this.completedFiles}/${this.totalFiles} complete`));
     } else {
       this.spinner.start('');
     }
@@ -134,14 +120,8 @@ export class DeploymentProgressHandler {
    * Called when inscription starts for a file
    */
   private onInscriptionStart(file: string, current: number, total: number): void {
-    const percent = Math.round((current / total) * 100);
-    const progressBar = this.createProgressBar(percent);
-
     this.spinner.text =
-      chalk.yellow(`[${progressBar}] ${percent}% `) +
-      chalk.gray(`Inscribing `) +
-      chalk.cyan(file) +
-      chalk.gray(` (${current}/${total})`);
+      chalk.gray(`Inscribing `) + chalk.cyan(file) + chalk.gray(` (${current}/${total})`);
   }
 
   /**
