@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { writeFile, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
-import { analyzeBuildDirectory } from './analyzer.js';
+import { analyzeBuildDirectory } from '../analyzer.js';
 import { tmpdir } from 'os';
 
 // Helper to create a temporary test directory

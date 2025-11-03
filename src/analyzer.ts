@@ -28,8 +28,19 @@ const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
   '.wasm': 'application/wasm',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
   '.ogg': 'video/ogg',
+  '.ogv': 'video/ogg',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.oga': 'audio/ogg',
+  '.flac': 'audio/flac',
   '.wav': 'audio/wav',
   '.txt': 'text/plain',
   '.xml': 'application/xml',
@@ -40,11 +51,38 @@ const CONTENT_TYPE_MAP: typeof CONTENT_TYPES = {
 /**
  * Recursively scans a directory for all files
  */
+/**
+ * Files and directories that should NEVER be deployed
+ * SECURITY: .env files contain secrets and must be excluded!
+ */
+const EXCLUDED_PATTERNS = [
+  /^\.env/, // .env, .env.local, .env.production, etc.
+  /^deployment-manifest.*\.json$/, // deployment-manifest.json, deployment-manifest-backup.json, etc.
+  /^\.git/, // .git, .gitignore, .github, etc.
+  /^\.DS_Store$/, // macOS metadata
+  /^Thumbs\.db$/, // Windows metadata
+  /^node_modules$/, // Dependencies (shouldn't be in build dir, but just in case)
+  /^\.vscode$/, // VS Code settings
+  /^\.idea$/, // IntelliJ settings
+];
+
+/**
+ * Check if a filename should be excluded from deployment
+ */
+function shouldExcludeFile(filename: string): boolean {
+  return EXCLUDED_PATTERNS.some((pattern) => pattern.test(filename));
+}
+
 async function scanDirectory(dir: string): Promise<string[]> {
   const files: string[] = [];
   const entries = await readdir(dir, { withFileTypes: true });
 
   for (const entry of entries) {
+    // Skip excluded files and directories
+    if (shouldExcludeFile(entry.name)) {
+      continue;
+    }
+
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await scanDirectory(fullPath)));
@@ -172,7 +210,7 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
   // Handle data-* attributes with common asset patterns
   // This catches patterns like data-src, data-background, data-poster, etc.
   const dataAttrPattern =
-    /data-[a-z-]+\s*=\s*["']([^"']*\.(png|jpg|jpeg|gif|svg|webp|mp4|webm|ico))["']/gi;
+    /data-[a-z-]+\s*=\s*["']([^"']*\.(png|jpg|jpeg|gif|svg|webp|mp4|m4v|mov|webm|avi|mkv|flv|wmv|ogg|ogv|mp3|m4a|aac|oga|flac|wav|ico))["']/gi;
   let dataMatch;
   while ((dataMatch = dataAttrPattern.exec(content)) !== null) {
     const ref = dataMatch[1];
@@ -339,7 +377,7 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
   // Match template literals with simple asset paths (no variables)
   // Example: `./image.png` or `/assets/logo.svg`
   const templateLiteralPattern =
-    /`(\.{0,2}\/[^`]*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|wasm|webm|mp4|ogg|mp3|wav))`/gi;
+    /`(\.{0,2}\/[^`]*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|wasm|webm|mp4|m4v|mov|avi|mkv|flv|wmv|ogg|ogv|mp3|m4a|aac|oga|flac|wav))`/gi;
   let templateMatch;
   while ((templateMatch = templateLiteralPattern.exec(content)) !== null) {
     const ref = templateMatch[1];
@@ -356,7 +394,7 @@ function extractJsReferences(content: string, baseDir: string, filePath: string)
   // Match patterns like "/assets/logo.png" or "./image.jpg"
   // Expanded to include more extensions: wasm, video, audio
   const assetPattern =
-    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|wasm|webm|mp4|ogg|mp3|wav))["']/gi;
+    /["'](\.{0,2}\/[^"']*\.(png|jpg|jpeg|gif|svg|webp|ico|woff|woff2|ttf|eot|otf|json|wasm|webm|mp4|m4v|mov|avi|mkv|flv|wmv|ogg|ogv|mp3|m4a|aac|oga|flac|wav))["']/gi;
   let match;
 
   while ((match = assetPattern.exec(content)) !== null) {
@@ -506,12 +544,16 @@ async function analyzeFile(filePath: string, baseDir: string): Promise<FileRefer
   // Compute SHA256 hash of original content buffer (before any rewriting)
   const contentHash = createHash('sha256').update(contentBuffer).digest('hex');
 
+  // Get file size from buffer length
+  const fileSize = contentBuffer.length;
+
   return {
     originalPath: relativePath,
     absolutePath: filePath,
     contentType: CONTENT_TYPE_MAP[ext] || 'application/octet-stream',
     dependencies,
     contentHash,
+    fileSize,
   };
 }
 

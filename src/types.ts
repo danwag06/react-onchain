@@ -14,6 +14,51 @@ export interface FileReference {
   dependencies: string[];
   /** SHA256 hash of original file content (before rewriting) */
   contentHash: string;
+  /** File size in bytes */
+  fileSize: number;
+}
+
+/**
+ * Reference to a single chunk in a chunked file
+ */
+export interface ChunkReference {
+  /** Chunk sequence number (0, 1, 2, ...) */
+  index: number;
+  /** Transaction ID for this chunk */
+  txid: string;
+  /** Output index */
+  vout: number;
+  /** Size of this chunk in bytes */
+  size: number;
+}
+
+/**
+ * Manifest for a chunked file - inscribed on-chain for client-side reassembly
+ */
+export interface ChunkManifest {
+  /** Manifest schema version */
+  version: '1.0';
+  /** Original file path */
+  originalPath: string;
+  /** MIME type of the complete file */
+  mimeType: string;
+  /** Total size of the complete file in bytes */
+  totalSize: number;
+  /** Size of each chunk (last chunk may be smaller) */
+  chunkSize: number;
+  /** Array of chunk references in order */
+  chunks: Array<{
+    /** Chunk index */
+    index: number;
+    /** Transaction ID */
+    txid: string;
+    /** Output index */
+    vout: number;
+    /** URL path to fetch chunk */
+    urlPath: string;
+    /** Size of this chunk in bytes */
+    size: number;
+  }>;
 }
 
 /**
@@ -28,7 +73,7 @@ export interface InscribedFile {
   vout: number;
   /** URL path for the inscription (e.g., "/content/txid_vout") */
   urlPath: string;
-  /** File size in bytes */
+  /** File size in bytes (total size for chunked files) */
   size: number;
   /** SHA256 hash of original file content (before rewriting) - optional for backward compatibility */
   contentHash?: string;
@@ -36,6 +81,12 @@ export interface InscribedFile {
   dependencyHash?: string;
   /** Whether this file was reused from cache (not newly inscribed) */
   cached?: boolean;
+  /** Whether this file was chunked during inscription */
+  isChunked?: boolean;
+  /** Number of chunks (only present if isChunked is true) */
+  chunkCount?: number;
+  /** Array of chunk references (only present if isChunked is true) */
+  chunks?: ChunkReference[];
 }
 
 /**
@@ -79,6 +130,10 @@ export interface DeploymentConfig {
   versioningOriginInscription?: string;
   /** App name for versioning inscription - required */
   appName: string;
+
+  // Chunking options
+  /** Number of chunks to inscribe in parallel per batch (default: 10) */
+  chunkBatchSize?: number;
 }
 
 /**
@@ -180,6 +235,23 @@ export const CONTENT_TYPES: Record<string, string> = {
   '.ttf': 'font/ttf',
   '.eot': 'application/vnd.ms-fontobject',
   '.otf': 'font/otf',
+  '.wasm': 'application/wasm',
+  '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  '.flv': 'video/x-flv',
+  '.wmv': 'video/x-ms-wmv',
+  '.ogg': 'video/ogg',
+  '.ogv': 'video/ogg',
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.oga': 'audio/ogg',
+  '.flac': 'audio/flac',
+  '.wav': 'audio/wav',
   '.txt': 'text/plain',
   '.xml': 'application/xml',
   '.pdf': 'application/pdf',

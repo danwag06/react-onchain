@@ -156,6 +156,7 @@ export class GorillaPoolIndexer extends IndexerService {
       if (!utxo || utxo.length === 0) {
         break;
       }
+
       // Convert to UTXO format
       const batchUtxos = utxo.map((u: GorillaPoolUtxo) => ({
         txid: u.outpoint.split('_')[0],

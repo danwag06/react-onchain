@@ -10,7 +10,7 @@ Your react application on-chain forever! No servers, no hosting fees, no downtim
 
 **The best part?** Most apps deploy for less than a penny. Your React app becomes censorship-resistant, permanently accessible, and truly decentralized—all for the cost of a fraction of a cent.
 
-<a href="https://reactonchain.com" target="_blank">
+<a href="https://app.reactonchain.com" target="_blank">
   <img src="https://img.shields.io/badge/🌐_View_App-0066ff?style=for-the-badge&labelColor=000000" alt="View App">
 </a>
 

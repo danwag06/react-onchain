@@ -92,7 +92,7 @@ export async function deployVersioningInscription(
   appName: string,
   destinationAddress: string,
   satsPerKb?: number
-): Promise<string> {
+): Promise<{ outpoint: string; changeUtxo?: Utxo }> {
   try {
     const result = await retryWithBackoff(
       async () => {
@@ -137,8 +137,14 @@ export async function deployVersioningInscription(
         // Broadcast the transaction
         const txid = await indexer.broadcastTransaction(ordResult.tx.toHex());
 
-        // Return the inscription outpoint (txid_vout)
-        return `${txid}_0`;
+        // Get change UTXO from the transaction (if it exists)
+        const changeUtxo = ordResult.payChange;
+
+        // Return the inscription outpoint and change UTXO
+        return {
+          outpoint: `${txid}_0`,
+          changeUtxo,
+        };
       },
       {
         maxAttempts: 5,

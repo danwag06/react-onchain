@@ -66,6 +66,23 @@ function formatBytes(bytes: number): string {
 }
 
 /**
+ * Parse size input - accepts plain numbers (interpreted as MB) or byte counts
+ * Examples: "3" = 3MB, "5242880" = 5MB in bytes
+ */
+function parseSizeInput(input: string): number {
+  const num = parseFloat(input);
+  if (isNaN(num)) {
+    throw new Error(`Invalid size: ${input}`);
+  }
+  // If the number is small (< 100), treat as MB
+  // Otherwise treat as bytes
+  if (num < 100) {
+    return Math.floor(num * 1024 * 1024);
+  }
+  return Math.floor(num);
+}
+
+/**
  * Helper to read and parse manifest data
  * Returns empty object if manifest doesn't exist or can't be read
  */
@@ -130,18 +147,25 @@ async function loadContentUrl(manifestPath: string = MANIFEST_FILENAME): Promise
  * Display file size summary table
  */
 function displaySummary(inscriptions: InscribedFile[], totalSize: number): void {
-  // Separate cached and new files
+  // Categorize files
   const newFiles = inscriptions.filter((f) => !f.cached);
   const cachedFiles = inscriptions.filter((f) => f.cached);
 
+  // Further categorize new files
+  const regularFiles = newFiles.filter(
+    (f) => !f.isChunked && f.originalPath !== 'chunk-reassembly-sw.js'
+  );
+  const chunkedFiles = newFiles.filter((f) => f.isChunked);
+  const serviceWorker = newFiles.find((f) => f.originalPath === 'chunk-reassembly-sw.js');
+
   const { FILENAME_MAX_LENGTH, FILENAME_TRUNCATE_SUFFIX, DIVIDER_LENGTH } = CLI_CONSTANTS;
 
-  // Display new inscriptions
-  if (newFiles.length > 0) {
+  // Display regular new files
+  if (regularFiles.length > 0) {
     console.log(chalk.bold.white('📄 New Inscriptions'));
     console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
 
-    newFiles.forEach((file, index) => {
+    regularFiles.forEach((file, index) => {
       const fileName =
         file.originalPath.length > FILENAME_MAX_LENGTH
           ? '...' + file.originalPath.slice(-FILENAME_TRUNCATE_SUFFIX)
@@ -155,13 +179,63 @@ function displaySummary(inscriptions: InscribedFile[], totalSize: number): void 
       console.log(`  ${number}${name} ${size} ${txid}`);
     });
 
-    const newFilesSize = newFiles.reduce((sum, f) => sum + f.size, 0);
+    const regularFilesSize = regularFiles.reduce((sum, f) => sum + f.size, 0);
     console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log(
       chalk.gray('  SUBTOTAL'.padEnd(39)) +
-        chalk.bold.green(formatBytes(newFilesSize).padEnd(11)) +
-        chalk.gray(`${newFiles.length} file${newFiles.length !== 1 ? 's' : ''}`)
+        chalk.bold.green(formatBytes(regularFilesSize).padEnd(11)) +
+        chalk.gray(`${regularFiles.length} file${regularFiles.length !== 1 ? 's' : ''}`)
     );
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
+    console.log();
+  }
+
+  // Display chunked files
+  if (chunkedFiles.length > 0) {
+    console.log(chalk.bold.magenta('📦 Chunked Files'));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
+
+    chunkedFiles.forEach((file, index) => {
+      const fileName =
+        file.originalPath.length > FILENAME_MAX_LENGTH
+          ? '...' + file.originalPath.slice(-FILENAME_TRUNCATE_SUFFIX)
+          : file.originalPath;
+
+      const number = chalk.gray(`${String(index + 1).padStart(2)}. `);
+      const name = chalk.magenta(fileName.padEnd(FILENAME_MAX_LENGTH - 10));
+      const chunkInfo = chalk.gray(`(${file.chunkCount} chunks)`);
+      const size = chalk.yellow(formatBytes(file.size).padEnd(10));
+      const txid = chalk.gray(file.txid.slice(0, 8) + '...');
+
+      console.log(`  ${number}${name} ${chunkInfo} ${size} ${txid}`);
+    });
+
+    const chunkedFilesSize = chunkedFiles.reduce((sum, f) => sum + f.size, 0);
+    const totalChunks = chunkedFiles.reduce((sum, f) => sum + (f.chunkCount || 0), 0);
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
+    console.log(
+      chalk.gray('  SUBTOTAL'.padEnd(39)) +
+        chalk.bold.magenta(formatBytes(chunkedFilesSize).padEnd(11)) +
+        chalk.gray(
+          `${chunkedFiles.length} file${chunkedFiles.length !== 1 ? 's' : ''} (${totalChunks} chunks)`
+        )
+    );
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
+    console.log();
+  }
+
+  // Display service worker
+  if (serviceWorker) {
+    console.log(chalk.bold.blue('⚙️  Service Worker'));
+    console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
+
+    const number = chalk.gray('  1. ');
+    const name = chalk.blue(serviceWorker.originalPath.padEnd(FILENAME_MAX_LENGTH));
+    const size = chalk.yellow(formatBytes(serviceWorker.size).padEnd(10));
+    const txid = chalk.gray(serviceWorker.txid.slice(0, 8) + '...');
+
+    console.log(`${number}${name} ${size} ${txid}`);
+
     console.log(chalk.gray('─'.repeat(DIVIDER_LENGTH)));
     console.log();
   }
@@ -469,6 +543,11 @@ program
     'Application name for new versioning origin inscription',
     envConfig.appName
   )
+  .option(
+    '--chunk-batch-size <number>',
+    'Number of chunks to inscribe in parallel per batch (default: 10)',
+    '10'
+  )
   .action(async (options) => {
     try {
       // Step 0: Capture which flags were explicitly provided via CLI (before interactive prompts)
@@ -691,6 +770,7 @@ program
         versionDescription: options.versionDescription!,
         versioningOriginInscription: options.versioningOriginInscription,
         appName: options.appName!,
+        chunkBatchSize: options.chunkBatchSize ? parseInt(options.chunkBatchSize, 10) : undefined,
       };
 
       // Confirmation prompt before deployment (skip if flags were explicitly provided via CLI)
@@ -724,54 +804,134 @@ program
       const contentUrlForDisplay = config.ordinalContentUrl || envConfig.ordinalContentUrl;
 
       let spinner = ora({ text: 'Analyzing build directory...', color: 'cyan' }).start();
+      let totalFiles = 0;
+      let completedFiles = 0;
 
       const result = await deployToChain(config, {
         onAnalysisStart: () => {
           spinner.text = '🔍 Analyzing build directory...';
         },
         onAnalysisComplete: (count) => {
-          spinner.succeed(chalk.bold.green(`Found ${chalk.white(count)} files to inscribe`));
+          totalFiles = count;
+          spinner.succeed(chalk.bold.green(`Found ${chalk.white(count)} source files`));
+        },
+        onCacheAnalysis: (cachedCount, newCount, cachedFiles, chunkedFilesInfo) => {
+          // Show cache analysis with detailed chunk information
+          if (cachedCount > 0) {
+            // Show chunked files separately
+            const chunkedFiles = chunkedFilesInfo.filter((f) => !f.isServiceWorker);
+            const cachedSW = chunkedFilesInfo.find((f) => f.isServiceWorker);
+            const regularCachedCount = cachedCount - chunkedFiles.length - (cachedSW ? 1 : 0);
+
+            if (chunkedFiles.length > 0) {
+              for (const chunkedFile of chunkedFiles) {
+                console.log(
+                  chalk.gray('  ├─ ') +
+                    chalk.green(`${chunkedFile.chunkCount} cached chunks`) +
+                    chalk.gray(` (${chunkedFile.filename})`)
+                );
+              }
+            }
+
+            if (cachedSW) {
+              console.log(
+                chalk.gray('  ├─ ') +
+                  chalk.green(`1 cached`) +
+                  chalk.gray(' (chunk-reassembly-sw.js)')
+              );
+            }
+
+            if (regularCachedCount > 0) {
+              console.log(
+                chalk.gray('  ├─ ') +
+                  chalk.green(`${regularCachedCount} cached`) +
+                  chalk.gray(' (will reuse from previous deployment)')
+              );
+            }
+
+            console.log(
+              chalk.gray('  └─ ') +
+                chalk.yellow(`${newCount} new`) +
+                chalk.gray(' (will be inscribed)')
+            );
+          } else {
+            console.log(chalk.gray('  └─ ') + chalk.yellow(`${newCount} files will be inscribed`));
+          }
           console.log();
           console.log(chalk.bold.white('⚡ Inscribing to BSV Blockchain'));
           console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
           spinner = ora({ text: 'Preparing inscription...', color: 'yellow' }).start();
         },
         onInscriptionStart: (file, current, total) => {
+          // Update overall progress bar
           const percent = Math.round((current / total) * 100);
           const { PROGRESS_BAR_WIDTH } = CLI_CONSTANTS;
           const filled = Math.floor(percent / 5);
           const progressBar = '█'.repeat(filled) + '░'.repeat(PROGRESS_BAR_WIDTH - filled);
+
           spinner.text =
-            chalk.yellow(`[${progressBar}] ${percent}%`) +
-            chalk.gray(` Inscribing `) +
+            chalk.yellow(`[${progressBar}] ${percent}% `) +
+            chalk.gray(`Inscribing `) +
             chalk.cyan(file) +
             chalk.gray(` (${current}/${total})`);
         },
         onInscriptionComplete: (file, url) => {
+          completedFiles++;
           const absoluteUrl = contentUrlForDisplay + url;
           const shortUrl = absoluteUrl.split('/').pop() || url;
           spinner.stopAndPersist({
             symbol: chalk.green('✓'),
             text: chalk.white(file.padEnd(35)) + chalk.gray(' → ') + chalk.cyan(shortUrl),
           });
-          spinner.start('');
+
+          // Show overall progress after completion
+          if (completedFiles < totalFiles) {
+            const percent = Math.round((completedFiles / totalFiles) * 100);
+            const { PROGRESS_BAR_WIDTH } = CLI_CONSTANTS;
+            const filled = Math.floor(percent / 5);
+            const progressBar = '█'.repeat(filled) + '░'.repeat(PROGRESS_BAR_WIDTH - filled);
+            spinner.start(
+              chalk.yellow(`[${progressBar}] ${percent}% `) +
+                chalk.gray(`${completedFiles}/${totalFiles} complete`)
+            );
+          } else {
+            spinner.start('');
+          }
         },
-        onInscriptionSkipped: (file, url) => {
+        onInscriptionSkipped: (file, url, chunkCount) => {
+          completedFiles++;
           const absoluteUrl = contentUrlForDisplay + url;
           const shortUrl = absoluteUrl.split('/').pop() || url;
+          const cacheInfo = chunkCount
+            ? chalk.gray(` (cached, ${chunkCount} chunks)`)
+            : chalk.gray(' (cached)');
           spinner.stopAndPersist({
             symbol: chalk.blue('↻'),
             text:
-              chalk.white(file.padEnd(35)) +
-              chalk.gray(' → ') +
-              chalk.cyan(shortUrl) +
-              chalk.gray(' (cached)'),
+              chalk.white(file.padEnd(35)) + chalk.gray(' → ') + chalk.cyan(shortUrl) + cacheInfo,
           });
-          spinner.start('');
+
+          // Show overall progress after skipping
+          if (completedFiles < totalFiles) {
+            const percent = Math.round((completedFiles / totalFiles) * 100);
+            const { PROGRESS_BAR_WIDTH } = CLI_CONSTANTS;
+            const filled = Math.floor(percent / 5);
+            const progressBar = '█'.repeat(filled) + '░'.repeat(PROGRESS_BAR_WIDTH - filled);
+            spinner.start(
+              chalk.yellow(`[${progressBar}] ${percent}% `) +
+                chalk.gray(`${completedFiles}/${totalFiles} complete`)
+            );
+          } else {
+            spinner.start('');
+          }
         },
         onDeploymentComplete: () => {
           spinner.stop();
           console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
+        },
+        onProgress: (message) => {
+          // Update spinner with progress messages (overall progress bar shown via onInscriptionStart)
+          spinner.text = chalk.gray(message);
         },
       });
 
@@ -799,21 +959,44 @@ program
       // Display file size summary
       displaySummary(result.inscriptions, result.totalSize);
 
-      // Stats section
-      const newFileCount = result.inscriptions.filter((f) => !f.cached).length;
-      const cachedFileCount = result.inscriptions.filter((f) => f.cached).length;
-      const newFilesSize = result.inscriptions
-        .filter((f) => !f.cached)
-        .reduce((sum, f) => sum + f.size, 0);
+      // Stats section with detailed breakdown
+      const newFiles = result.inscriptions.filter((f) => !f.cached);
+      const cachedFiles = result.inscriptions.filter((f) => f.cached);
+      const chunkedFiles = newFiles.filter((f) => f.isChunked);
+      const regularFiles = newFiles.filter(
+        (f) => !f.isChunked && f.originalPath !== 'chunk-reassembly-sw.js'
+      );
+      const serviceWorker = newFiles.find((f) => f.originalPath === 'chunk-reassembly-sw.js');
+
+      const newFilesSize = newFiles.reduce((sum, f) => sum + f.size, 0);
+      const totalChunks = chunkedFiles.reduce((sum, f) => sum + (f.chunkCount || 0), 0);
 
       console.log(chalk.bold.white('📊 Deployment Stats'));
       console.log(chalk.gray('─'.repeat(CLI_CONSTANTS.DIVIDER_LENGTH)));
       console.log(
-        chalk.gray('  New files:        ') +
-          chalk.white(newFileCount) +
-          chalk.gray(` (${formatBytes(newFilesSize)})`)
+        chalk.gray('  Regular files:    ') +
+          chalk.white(regularFiles.length) +
+          chalk.gray(` (${formatBytes(regularFiles.reduce((sum, f) => sum + f.size, 0))})`)
       );
-      console.log(chalk.gray('  Cached files:     ') + chalk.cyan(cachedFileCount));
+      if (chunkedFiles.length > 0) {
+        console.log(
+          chalk.gray('  Chunked files:    ') +
+            chalk.magenta(chunkedFiles.length) +
+            chalk.gray(
+              ` (${formatBytes(chunkedFiles.reduce((sum, f) => sum + f.size, 0))}, ${totalChunks} chunks)`
+            )
+        );
+      }
+      if (serviceWorker) {
+        console.log(
+          chalk.gray('  Service Worker:   ') +
+            chalk.blue('1') +
+            chalk.gray(` (${formatBytes(serviceWorker.size)})`)
+        );
+      }
+      if (cachedFiles.length > 0) {
+        console.log(chalk.gray('  Cached files:     ') + chalk.cyan(cachedFiles.length));
+      }
       console.log(
         chalk.gray('  Total files:      ') +
           chalk.white(result.inscriptions.length) +
