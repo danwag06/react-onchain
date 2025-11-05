@@ -7,7 +7,7 @@ import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { formatError } from '../../utils/errors.js';
 import { shouldSkipUrl } from '../utils.js';
-import { resolveReference } from './utils.js';
+import { resolveAssetPath } from '../utils.js';
 import {
   STATIC_WEBPACK_FIX_OUTPOINT,
   STATIC_BASE_PATH_FIX_OUTPOINT,
@@ -133,7 +133,18 @@ export async function rewriteHtml(
     { regex: /(<source[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
     { regex: /(<video[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
     { regex: /(<audio[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
+    { regex: /(<video[^>]+poster=["'])([^"']+)(["'][^>]*>)/gi, attr: 'poster' },
+    { regex: /(<object[^>]+data=["'])([^"']+)(["'][^>]*>)/gi, attr: 'data' },
+    { regex: /(<embed[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
+    { regex: /(<track[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
+    { regex: /(<iframe[^>]+src=["'])([^"']+)(["'][^>]*>)/gi, attr: 'src' },
     { regex: /(<meta[^>]+content=["'])([^"']+)(["'][^>]*>)/gi, attr: 'content' },
+    // Handle data-* attributes with asset references (matches analyzer detection)
+    {
+      regex:
+        /(data-[a-z-]+=["'])([^"']*\.(?:png|jpg|jpeg|gif|svg|webp|mp4|m4v|mov|webm|avi|mkv|flv|wmv|ogg|ogv|mp3|m4a|aac|oga|flac|wav|ico))(["'])/gi,
+      attr: 'data-*',
+    },
   ];
 
   for (const { regex } of patterns) {
@@ -144,7 +155,7 @@ export async function rewriteHtml(
       }
 
       try {
-        const resolvedPath = resolveReference(url, originalPath, baseDir);
+        const resolvedPath = resolveAssetPath(url, originalPath, baseDir);
         const contentUrl = urlMap.get(resolvedPath);
 
         if (contentUrl) {
@@ -157,6 +168,43 @@ export async function rewriteHtml(
       return match;
     });
   }
+
+  // Handle srcset attributes (responsive images)
+  // srcset format: "image1.jpg 100w, image2.jpg 200w" or "image1.jpg 1x, image2.jpg 2x"
+  const srcsetPattern = /(<(?:img|source)[^>]+srcset=["'])([^"']+)(["'][^>]*>)/gi;
+  content = content.replace(srcsetPattern, (_match, before, srcsetValue, after) => {
+    // Split by comma and process each URL+descriptor pair
+    const srcsetItems = srcsetValue.split(',').map((item: string) => item.trim());
+    const rewrittenItems = srcsetItems.map((item: string) => {
+      // Split on whitespace to separate URL from descriptor (1x, 2x, 100w, etc.)
+      const parts = item.trim().split(/\s+/);
+      const url = parts[0];
+      const descriptor = parts.slice(1).join(' '); // Preserve any descriptors
+
+      if (shouldSkipUrl(url)) {
+        return item;
+      }
+
+      try {
+        const resolvedPath = resolveAssetPath(url, originalPath, baseDir);
+        const contentUrl = urlMap.get(resolvedPath);
+
+        if (contentUrl) {
+          // Return rewritten URL with original descriptor
+          return descriptor ? `${contentUrl} ${descriptor}` : contentUrl;
+        }
+      } catch (error) {
+        console.warn(
+          `Could not resolve srcset reference ${url} in ${originalPath}:`,
+          formatError(error)
+        );
+      }
+
+      return item;
+    });
+
+    return `${before}${rewrittenItems.join(', ')}${after}`;
+  });
 
   return content;
 }

@@ -106,7 +106,7 @@ async function loadManifestData(manifestPath: string): Promise<ManifestData | nu
         // Load cached files (minimal string references from previous deployments)
         // Format: "path::*::txid_vout"
         // Search backwards through deployment history to find full file details
-        if (recentDeployment.cachedFiles) {
+        if (Array.isArray(recentDeployment.cachedFiles)) {
           for (const cachedStr of recentDeployment.cachedFiles) {
             // Parse the cached file string
             const [originalPath, outpoint] = cachedStr.split(CACHED_FILE_DELIMITER);

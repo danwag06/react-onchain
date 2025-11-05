@@ -112,6 +112,8 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
     /<video[^>]+poster=["']([^"']+)["']/gi, // Video poster thumbnails
     /<object[^>]+data=["']([^"']+)["']/gi, // Object data
     /<embed[^>]+src=["']([^"']+)["']/gi, // Embed src
+    /<track[^>]+src=["']([^"']+)["']/gi, // Track src (captions/subtitles)
+    /<iframe[^>]+src=["']([^"']+)["']/gi, // iframe src
   ];
 
   for (const pattern of patterns) {
@@ -185,6 +187,43 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
     }
   }
 
+  // Handle resource hints (preload, prefetch, modulepreload)
+  // These are modern performance optimization patterns
+  const resourceHintPatterns = [
+    /<link[^>]*rel=["'](?:preload|prefetch|modulepreload)["'][^>]*href=["']([^"']+)["']/gi,
+    /<link[^>]*href=["']([^"']+)["'][^>]*rel=["'](?:preload|prefetch|modulepreload)["']/gi,
+  ];
+  for (const pattern of resourceHintPatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const ref = match[1];
+      if (!shouldSkipUrl(ref)) {
+        const resolvedPath = ref.startsWith('/')
+          ? join(baseDir, ref.substring(1))
+          : resolve(fileDir, ref);
+        references.push(resolvedPath);
+      }
+    }
+  }
+
+  // Handle PWA startup images (apple-touch-startup-image)
+  const startupImagePatterns = [
+    /<link[^>]*rel=["']apple-touch-startup-image["'][^>]*href=["']([^"']+)["']/gi,
+    /<link[^>]*href=["']([^"']+)["'][^>]*rel=["']apple-touch-startup-image["']/gi,
+  ];
+  for (const pattern of startupImagePatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const ref = match[1];
+      if (!shouldSkipUrl(ref)) {
+        const resolvedPath = ref.startsWith('/')
+          ? join(baseDir, ref.substring(1))
+          : resolve(fileDir, ref);
+        references.push(resolvedPath);
+      }
+    }
+  }
+
   // Separately handle meta tags with og:image or twitter:image properties
   // These can have property/content in either order
   const metaImagePatterns = [
@@ -199,6 +238,24 @@ function extractHtmlReferences(content: string, baseDir: string, filePath: strin
       // Skip external URLs and data URIs
       if (!shouldSkipUrl(ref)) {
         // Resolve relative to the HTML file
+        const resolvedPath = ref.startsWith('/')
+          ? join(baseDir, ref.substring(1))
+          : resolve(fileDir, ref);
+        references.push(resolvedPath);
+      }
+    }
+  }
+
+  // Handle Windows tile images (msapplication-TileImage)
+  const msTilePatterns = [
+    /<meta[^>]*name=["']msapplication-TileImage["'][^>]*content=["']([^"']+)["']/gi,
+    /<meta[^>]*content=["']([^"']+)["'][^>]*name=["']msapplication-TileImage["']/gi,
+  ];
+  for (const pattern of msTilePatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const ref = match[1];
+      if (!shouldSkipUrl(ref)) {
         const resolvedPath = ref.startsWith('/')
           ? join(baseDir, ref.substring(1))
           : resolve(fileDir, ref);

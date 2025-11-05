@@ -1,6 +1,6 @@
 /**
  * Rewriting Module
- * URL rewriting for HTML, CSS, and JavaScript files
+ * URL rewriting for HTML, CSS, JavaScript, JSON, and SVG files
  */
 
 import { readFile } from 'fs/promises';
@@ -14,6 +14,8 @@ import {
 } from './htmlRewriter.js';
 import { rewriteCss } from './cssRewriter.js';
 import { rewriteJs } from './jsRewriter.js';
+import { rewriteJson } from './jsonRewriter.js';
+import { rewriteSvg } from './svgRewriter.js';
 import { createUrlMap } from './utils.js';
 
 // Re-export individual rewriters
@@ -26,6 +28,8 @@ export {
   minifyScript,
   rewriteCss,
   rewriteJs,
+  rewriteJson,
+  rewriteSvg,
   createUrlMap,
 };
 
@@ -47,6 +51,12 @@ export async function rewriteFile(
     return Buffer.from(content, 'utf-8');
   } else if (contentType === 'application/javascript') {
     const content = await rewriteJs(filePath, baseDir, originalPath, urlMap);
+    return Buffer.from(content, 'utf-8');
+  } else if (contentType === 'application/json' || contentType === 'application/manifest+json') {
+    const content = await rewriteJson(filePath, baseDir, originalPath, urlMap);
+    return Buffer.from(content, 'utf-8');
+  } else if (contentType === 'image/svg+xml') {
+    const content = await rewriteSvg(filePath, baseDir, originalPath, urlMap);
     return Buffer.from(content, 'utf-8');
   } else {
     // For other file types, return as-is (binary files, etc.)

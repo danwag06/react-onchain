@@ -6,7 +6,7 @@
  */
 
 import type { PrivateKey } from '@bsv/sdk';
-import { createOrdinals, sendOrdinals, Utxo } from 'js-1sat-ord';
+import { createOrdinals, sendOrdinals, SendOrdinalsConfig, Utxo } from 'js-1sat-ord';
 import type {
   VersioningInscriptionInfo,
   VersionEntry,
@@ -215,7 +215,7 @@ export async function updateVersioningInscription(
           [`version.${version}`]: createVersionEntry(versionOutpoint, description),
         };
 
-        const ordData = {
+        const ordData: SendOrdinalsConfig = {
           ordinals: [info.utxo],
           destinations: [
             {

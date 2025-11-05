@@ -60,11 +60,10 @@
   async function redirectToVersion() {
     try {
       // Use relative path for querying latest inscription
-      const url = `/content/${VERSION_INSCRIPTION_ORIGIN}?seq=-1&map=true`;
+      const url = `/content/${VERSION_INSCRIPTION_ORIGIN}:-1?map=true`;
       log('[react-onchain] Fetching latest version metadata from:', url);
 
-      //TODO: use method head to get the headers only and fix other places that call this endpoint
-      const response = await fetch(url);
+      const response = await fetch(url, { method: 'HEAD' });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

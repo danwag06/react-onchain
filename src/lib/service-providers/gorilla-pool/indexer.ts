@@ -48,9 +48,9 @@ export class GorillaPoolIndexer extends IndexerService {
   ): Promise<{ metadata: VersionMetadata; utxo: Utxo | null }> {
     try {
       // Construct the URL to fetch the latest version metadata seq=-1 and map=true to get latest and metadata
-      const url = `${this.contentUrl}/content/${versionInscriptionOrigin}?seq=-1&map=true&out=${includeUtxo ? 'true' : 'false'}`;
+      const url = `${this.contentUrl}/content/${versionInscriptionOrigin}:-1?map=true&out=${includeUtxo ? 'true' : 'false'}`;
 
-      const response = await fetch(url);
+      const response = await fetch(url, { method: 'HEAD' });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch metadata: HTTP ${response.status}`);
