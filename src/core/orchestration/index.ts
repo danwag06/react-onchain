@@ -10,6 +10,7 @@ export {
   saveManifestWithHistory,
 } from './orchestrator.js';
 export { calculateDependencyWaves, prepareWaveJobs, processWaveResults } from './jobBuilder.js';
+export { processWaves } from './waveProcessor.js';
 
 export type {
   DeploymentConfig,
@@ -22,3 +23,5 @@ export type {
   ChunkedFileInfo,
   OrchestratorCallbacks,
 } from './orchestration.types.js';
+
+export type { WaveProcessingResult } from './waveProcessor.js';

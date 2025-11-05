@@ -448,6 +448,7 @@ function parseExistingEnv(envContent: string): {
     'BUILD_DIR',
     'APP_NAME',
     'VERSIONING_ORIGIN_INSCRIPTION',
+    'HTML_ORIGIN_INSCRIPTION',
     'ORDINAL_CONTENT_URL',
     'SATS_PER_KB',
   ];
@@ -502,6 +503,7 @@ export async function saveDeploymentEnv(config: {
   buildDir: string;
   appName: string;
   versioningOriginInscription: string;
+  htmlOriginInscription?: string;
   ordinalContentUrl: string;
   satsPerKb: number;
 }): Promise<void> {
@@ -571,6 +573,9 @@ APP_NAME=${config.appName}
 
 # Versioning origin inscription (permanent reference)
 VERSIONING_ORIGIN_INSCRIPTION=${config.versioningOriginInscription}
+
+# HTML origin inscription (permanent reference for :-1 resolution)
+HTML_ORIGIN_INSCRIPTION=${config.htmlOriginInscription || ''}
 
 # Content delivery service
 ORDINAL_CONTENT_URL=${config.ordinalContentUrl}

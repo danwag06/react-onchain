@@ -268,7 +268,10 @@ export async function checkVersionExists(
 ): Promise<void> {
   try {
     const indexer = getIndexer();
-    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+    const { metadata } = await indexer.fetchLatestFromOrigin(versionInscriptionOrigin, {
+      includeUtxo: false,
+      includeMap: true,
+    });
 
     if (!metadata) {
       throw new Error(
@@ -322,7 +325,10 @@ export async function getVersionDetails(
 } | null> {
   try {
     const indexer = getIndexer();
-    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+    const { metadata } = await indexer.fetchLatestFromOrigin(versionInscriptionOrigin, {
+      includeUtxo: false,
+      includeMap: true,
+    });
 
     if (!metadata) {
       return null;
@@ -361,7 +367,10 @@ export async function getInscriptionInfo(
 ): Promise<VersioningInscriptionInfo> {
   try {
     const indexer = getIndexer();
-    const { metadata } = await indexer.fetchLatestVersionMetadata(versionInscriptionOrigin, false);
+    const { metadata } = await indexer.fetchLatestFromOrigin(versionInscriptionOrigin, {
+      includeUtxo: false,
+      includeMap: true,
+    });
 
     if (!metadata) {
       throw new Error(`No metadata found for versioning inscription: ${versionInscriptionOrigin}`);
@@ -393,10 +402,10 @@ export async function getVersionInfoAndHistory(versionInscriptionOrigin: string)
   try {
     // Fetch metadata once
     const indexer = getIndexer();
-    const { metadata, utxo } = await indexer.fetchLatestVersionMetadata(
-      versionInscriptionOrigin,
-      true
-    );
+    const { metadata, utxo } = await indexer.fetchLatestFromOrigin(versionInscriptionOrigin, {
+      includeUtxo: true,
+      includeMap: true,
+    });
 
     if (!metadata) {
       throw new Error(`No metadata found for versioning inscription: ${versionInscriptionOrigin}`);

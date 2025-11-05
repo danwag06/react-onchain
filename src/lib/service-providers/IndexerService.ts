@@ -62,16 +62,19 @@ export abstract class IndexerService {
   }
 
   /**
-   * Fetch the latest inscription in an origin chain using standard content delivery endpoint
-   * Uses /content/<origin>?seq=-1 pattern which works across all ordinals service providers
+   * Fetch the latest inscription in an origin chain using :-1 resolution
+   * Generic method that works for any origin chain (versioning, HTML, etc.)
    *
    * @param origin - The origin outpoint (txid_vout)
-   * @returns The latest version metadata, or null if not found/spent
+   * @param options - Fetch options
+   * @param options.includeUtxo - Whether to fetch UTXO details (for spending in next deployment)
+   * @param options.includeMap - Whether to fetch metadata from x-map header
+   * @returns The latest inscription details
    */
-  abstract fetchLatestVersionMetadata(
+  abstract fetchLatestFromOrigin(
     origin: string,
-    includeUtxo: boolean
-  ): Promise<{ metadata: VersionMetadata; utxo: Utxo | null }>;
+    options: { includeUtxo: boolean; includeMap: boolean }
+  ): Promise<{ metadata: VersionMetadata | null; utxo: Utxo | null }>;
 
   /**
    * Broadcast a raw transaction to the network

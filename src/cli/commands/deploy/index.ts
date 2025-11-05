@@ -217,7 +217,8 @@ export function registerDeployCommand(program: Command): void {
         const history = await saveManifestWithHistory(
           manifest,
           outputManifestPath,
-          result.versioningOriginInscription
+          result.versioningOriginInscription,
+          result.htmlOriginInscription
         );
 
         if (!options.dryRun) {
@@ -226,6 +227,7 @@ export function registerDeployCommand(program: Command): void {
             buildDir: buildDir,
             appName: options.appName!,
             versioningOriginInscription: result.versioningOriginInscription,
+            htmlOriginInscription: result.htmlOriginInscription,
             ordinalContentUrl: result.ordinalContentUrl || envConfig.ordinalContentUrl,
             satsPerKb: parseInt(options.satsPerKb || '1', 10),
           });

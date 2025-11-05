@@ -581,9 +581,15 @@ react-onchain/
 │   │   │   ├── analyzer.ts
 │   │   │   ├── analyzer.types.ts
 │   │   │   └── index.ts
+│   │   ├── caching/                      # File caching & reuse analysis
+│   │   │   ├── analyzer.ts
+│   │   │   └── index.ts
 │   │   ├── chunking/                     # File chunking for large files
 │   │   │   ├── chunker.ts
 │   │   │   ├── chunking.types.ts
+│   │   │   └── index.ts
+│   │   ├── html/                         # HTML inscription (1-sat ordinal chain)
+│   │   │   ├── inscriber.ts
 │   │   │   └── index.ts
 │   │   ├── inscription/                  # Blockchain inscription operations
 │   │   │   ├── parallelInscriber.ts
@@ -592,26 +598,32 @@ react-onchain/
 │   │   │   ├── utils.ts
 │   │   │   └── index.ts
 │   │   ├── orchestration/                # Wave-based deployment coordination
-│   │   │   ├── orchestrator.ts
-│   │   │   ├── jobBuilder.ts
+│   │   │   ├── orchestrator.ts           # High-level orchestration
+│   │   │   ├── jobBuilder.ts             # Wave job preparation
+│   │   │   ├── waveProcessor.ts          # Wave execution
 │   │   │   ├── orchestration.types.ts
 │   │   │   └── index.ts
 │   │   ├── rewriting/                    # URL rewriting (HTML/CSS/JS)
 │   │   │   ├── htmlRewriter.ts
 │   │   │   ├── cssRewriter.ts
 │   │   │   ├── jsRewriter.ts
+│   │   │   ├── jsonRewriter.ts
+│   │   │   ├── svgRewriter.ts
 │   │   │   ├── utils.ts
 │   │   │   ├── templates/
 │   │   │   │   ├── versionRedirect.template.js
-│   │   │   │   └── basePathFix.template.js
+│   │   │   │   ├── basePathFix.template.js
+│   │   │   │   └── webpackPublicPathFix.template.js
 │   │   │   └── index.ts
 │   │   ├── versioning/                   # On-chain version management
-│   │   │   ├── versioningHandler.ts
+│   │   │   ├── versioningHandler.ts      # Version metadata management
+│   │   │   ├── inscriber.ts              # Version inscription operations
 │   │   │   ├── versioning.types.ts
 │   │   │   ├── utils.ts
 │   │   │   └── index.ts
 │   │   ├── service-worker/               # Service worker generation
-│   │   │   ├── generator.ts
+│   │   │   ├── generator.ts              # SW code generation
+│   │   │   ├── inscriber.ts              # SW inscription operations
 │   │   │   ├── types.ts
 │   │   │   ├── ChunkFetcher.ts
 │   │   │   ├── RangeCalculator.ts

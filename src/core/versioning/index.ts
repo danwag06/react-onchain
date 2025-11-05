@@ -15,8 +15,12 @@ export {
   getVersionInfoAndHistory,
 } from './versioningHandler.js';
 
+export { handleVersioningOriginInscription, handleVersioningMetadataUpdate } from './inscriber.js';
+
 export type {
   VersioningInscriptionInfo,
   VersionEntry,
   VersionMetadata,
 } from './versioning.types.js';
+
+export type { VersioningOriginResult } from './inscriber.js';

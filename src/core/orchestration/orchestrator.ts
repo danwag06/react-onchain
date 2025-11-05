@@ -1,61 +1,48 @@
 /**
- * New Wave-Based Orchestrator
+ * Wave-Based Deployment Orchestrator
  *
- * This orchestrator uses the parallel inscription system with wave-based processing
- * that respects topological dependencies while maximizing parallelism.
+ * High-level orchestration of deployment workflow using modular inscription handlers.
+ * This orchestrator coordinates between various specialized modules for a clean deployment flow.
  */
 
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
-import { createHash } from 'crypto';
 import { PrivateKey } from '@bsv/sdk';
 import { analyzeBuildDirectory } from '../analysis/index.js';
-import type { FileReference } from '../analysis/index.js';
 import { createIndexer, config as envConfig } from '../../lib/config.js';
-import { calculateDependencyWaves, prepareWaveJobs, processWaveResults } from './jobBuilder.js';
-import { shouldChunkFile } from '../chunking/index.js';
-import { parallelInscribe } from '../inscription/index.js';
-import { generateChunkReassemblyServiceWorker } from '../service-worker/index.js';
+import { calculateDependencyWaves } from './jobBuilder.js';
+import { processWaves } from './waveProcessor.js';
 import {
-  deployVersioningInscription,
-  updateVersioningInscription,
-  checkVersionExists,
-  VERSIONING_ENABLED,
-} from '../versioning/index.js';
+  handleVersioningOriginInscription,
+  handleVersioningMetadataUpdate,
+} from '../versioning/inscriber.js';
+import { handleServiceWorkerInscription } from '../service-worker/inscriber.js';
+import { handleHtmlInscription } from '../html/inscriber.js';
+import { analyzeCachedFiles } from '../caching/analyzer.js';
+import { checkVersionExists, VERSIONING_ENABLED } from '../versioning/versioningHandler.js';
 import type {
   DeploymentConfig,
   DeploymentResult,
   DeploymentManifest,
   DeploymentManifestHistory,
-  ChunkedFileInfo,
   OrchestratorCallbacks,
   WaveJobContext,
 } from './orchestration.types.js';
-import type { InscribedFile } from '../inscription/index.js';
-import type { ChunkManifest } from '../chunking/index.js';
-import type { Utxo } from 'js-1sat-ord';
+import type { InscribedFile } from '../inscription/inscription.types.js';
 import { formatError } from '../../utils/errors.js';
 import {
+  isIndexHtmlFile,
+  suggestNextVersion,
+  extractOutpointFromFile,
+} from '../inscription/utils.js';
+import {
   MANIFEST_FILENAME,
-  VERSIONING_ORIGIN_TYPE,
-  VERSIONING_METADATA_TYPE,
-  CONTENT_PATH_PREFIX,
-  OUTPOINT_SEPARATOR,
+  MANIFEST_VERSION,
   CACHED_FILE_DELIMITER,
   DEFAULT_SATS_PER_KB,
-  DEFAULT_INSCRIPTION_VOUT,
-  MANIFEST_VERSION,
-  MOCK_VERSIONING_TXID,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_THRESHOLD,
-  DEFAULT_CHUNK_BATCH_SIZE,
 } from '../../utils/constants.js';
-import {
-  extractOutpointFromFile,
-  calculateDependencyHash,
-  suggestNextVersion,
-  isIndexHtmlFile,
-} from '../inscription/index.js';
 
 // ============================================================================
 // Helper Functions
@@ -72,6 +59,7 @@ interface ManifestData {
   existingVersions: string[];
   previousInscriptions: Map<string, InscribedFile>;
   versioningOrigin?: string;
+  htmlOrigin?: string;
 }
 
 async function loadManifestData(manifestPath: string): Promise<ManifestData | null> {
@@ -94,6 +82,7 @@ async function loadManifestData(manifestPath: string): Promise<ManifestData | nu
         .map((d) => d.version)
         .filter((v): v is string => v !== undefined);
       result.versioningOrigin = history.originVersioningInscription;
+      result.htmlOrigin = history.originHtmlInscription;
 
       if (history.deployments.length > 0) {
         const recentDeployment = history.deployments[history.deployments.length - 1];
@@ -147,39 +136,6 @@ async function loadManifestData(manifestPath: string): Promise<ManifestData | nu
   } catch {
     return null;
   }
-}
-
-function canReuseInscription(
-  filePath: string,
-  fileRef: FileReference,
-  previousInscription: InscribedFile | undefined,
-  urlMap: Map<string, string>
-): boolean {
-  if (!previousInscription) return false;
-  if (isIndexHtmlFile(filePath)) return false;
-
-  // Content hash comparison
-  if (previousInscription.contentHash) {
-    // Previous inscription has content hash - compare directly
-    if (previousInscription.contentHash !== fileRef.contentHash) return false;
-  } else if (previousInscription.isChunked && previousInscription.chunks) {
-    // For chunked files from old deployments without contentHash,
-    // we can still reuse if we calculate the hash from stored chunk hashes
-    // The fileRef.contentHash is the hash of the entire file content
-    // We need to verify this matches the concatenation of previous chunks
-    // For now, we'll trust that if chunks exist and file size matches, we can reuse
-    // This is safe because chunks contain full file data
-    if (previousInscription.size !== fileRef.fileSize) return false;
-    // Size matches - assume content is the same (chunks are immutable on chain)
-  } else {
-    // No contentHash and not chunked (or chunks missing) - can't verify, must re-inscribe
-    return false;
-  }
-
-  if (fileRef.dependencies.length === 0) return true;
-
-  const currentDepHash = calculateDependencyHash(fileRef.dependencies, urlMap);
-  return previousInscription.dependencyHash === currentDepHash;
 }
 
 // ============================================================================
@@ -239,475 +195,180 @@ export async function deployToChain(
 
   const previousInscriptions =
     manifestData?.previousInscriptions || new Map<string, InscribedFile>();
+  const htmlOriginInscription = manifestData?.htmlOrigin;
 
-  // Step 2.5: Analyze which files can be cached
-  let cachedCount = 0;
-  const cachedFiles: string[] = [];
-  const chunkedFilesInfo: ChunkedFileInfo[] = [];
-  const tempUrlMap = new Map<string, string>(); // Temporary map for cache analysis
+  // Step 3: Analyze cache
+  const cacheAnalysis = await analyzeCachedFiles(
+    order,
+    graph,
+    previousInscriptions,
+    primaryContentUrl,
+    callbacks
+  );
 
-  for (const filePath of order) {
-    const node = graph.get(filePath);
-    if (!node) continue;
+  // Step 4: Deploy versioning origin inscription (first deployment only)
+  const versioningOriginResult = await handleVersioningOriginInscription(
+    versioningOriginInscription,
+    dryRun || false,
+    paymentPk,
+    appName || 'ReactApp',
+    destinationAddress,
+    satsPerKb,
+    callbacks,
+    order.length + 2
+  );
 
-    const fileRef = node.file;
-    const previousInscription = previousInscriptions.get(filePath);
-
-    // Check if we can reuse (same logic as later in wave processing)
-    const shouldReuse = canReuseInscription(filePath, fileRef, previousInscription, tempUrlMap);
-
-    if (shouldReuse && previousInscription) {
-      cachedCount++;
-      cachedFiles.push(filePath);
-      tempUrlMap.set(filePath, previousInscription.urlPath);
-
-      // Track chunked files with chunk counts
-      if (previousInscription.isChunked && previousInscription.chunks) {
-        chunkedFilesInfo.push({
-          filename: filePath,
-          chunkCount: previousInscription.chunks.length,
-          isServiceWorker: false,
-          urlPath: previousInscription.urlPath,
-        });
-      }
-    }
-  }
-
-  // Check if service worker can be cached (we need to peek ahead)
-  // Collect all chunk manifests from cached chunked files
-  const cachedChunkManifests: ChunkManifest[] = [];
-  const hasChunkedFiles = order.some((filePath) => {
-    const node = graph.get(filePath);
-    if (!node) return false;
-    const isChunked = shouldChunkFile(node.file.fileSize, filePath, DEFAULT_CHUNK_THRESHOLD);
-
-    // If this file is chunked and cached, build its manifest now
-    if (isChunked && cachedFiles.includes(filePath)) {
-      const prevInscription = previousInscriptions.get(filePath);
-      if (prevInscription?.isChunked && prevInscription.chunks) {
-        const fileRef = node.file;
-        const manifest: ChunkManifest = {
-          version: '1.0',
-          originalPath: filePath,
-          mimeType: fileRef.contentType,
-          totalSize: prevInscription.size,
-          chunkSize: prevInscription.chunks[0]?.size || 0,
-          chunks: prevInscription.chunks.map((c) => ({
-            index: c.index,
-            txid: c.txid,
-            vout: c.vout,
-            urlPath: `/content/${c.txid}_${c.vout}`,
-            size: c.size,
-          })),
-        };
-        cachedChunkManifests.push(manifest);
-      }
-    }
-
-    return isChunked;
-  });
-
-  if (hasChunkedFiles) {
-    // We'll have a service worker - check if it can be cached
-    // Generate SW now with cached chunk manifests to calculate hash
-    const previousSW = previousInscriptions.get('chunk-reassembly-sw.js');
-
-    if (cachedChunkManifests.length > 0 && previousSW) {
-      // Generate SW with cached manifests to check if hash matches
-      const swCode = generateChunkReassemblyServiceWorker(cachedChunkManifests, primaryContentUrl);
-      const swBuffer = Buffer.from(swCode, 'utf-8');
-      const swContentHash = createHash('sha256').update(swBuffer).digest('hex');
-
-      // Check if we can reuse the cached SW
-      if (previousSW.contentHash === swContentHash) {
-        cachedCount++;
-        cachedFiles.push('chunk-reassembly-sw.js');
-        chunkedFilesInfo.push({
-          filename: 'chunk-reassembly-sw.js',
-          chunkCount: 0,
-          isServiceWorker: true,
-          urlPath: previousSW.urlPath,
-        });
-      }
-    }
-  }
-
-  const newCount = files.length + (hasChunkedFiles ? 1 : 0) - cachedCount;
-  callbacks?.onCacheAnalysis?.(cachedCount, newCount, cachedFiles, chunkedFilesInfo);
-
-  // Step 3: Deploy empty versioning inscription (FIRST DEPLOYMENT ONLY)
-  let finalVersioningOriginInscription = versioningOriginInscription;
-  let seedUtxo: Utxo | undefined = undefined; // Change UTXO from versioning inscription to use for first wave
   const txids = new Set<string>();
-
-  if (!versioningOriginInscription && !dryRun && VERSIONING_ENABLED) {
-    callbacks?.onInscriptionStart?.(VERSIONING_ORIGIN_TYPE, 1, order.length + 2);
-    try {
-      const versioningResult = await deployVersioningInscription(
-        paymentPk,
-        appName || 'ReactApp',
-        destinationAddress,
-        satsPerKb
-      );
-      finalVersioningOriginInscription = versioningResult.outpoint;
-      seedUtxo = versioningResult.changeUtxo; // Capture change UTXO to avoid indexer timing issues
-
-      const originTxid = finalVersioningOriginInscription.split(OUTPOINT_SEPARATOR)[0];
-      txids.add(originTxid);
-      callbacks?.onInscriptionComplete?.(
-        VERSIONING_ORIGIN_TYPE,
-        `${CONTENT_PATH_PREFIX}${finalVersioningOriginInscription}`
-      );
-
-      if (seedUtxo) {
-        callbacks?.onProgress?.(
-          `  ✓ Change UTXO captured: ${seedUtxo.txid}:${seedUtxo.vout} (${seedUtxo.satoshis} sats)`
-        );
-      }
-    } catch (error) {
-      throw new Error(`Failed to deploy versioning inscription: ${formatError(error)}`);
-    }
-  } else if (dryRun && !versioningOriginInscription) {
-    finalVersioningOriginInscription = `${MOCK_VERSIONING_TXID}${OUTPOINT_SEPARATOR}${DEFAULT_INSCRIPTION_VOUT}`;
+  if (versioningOriginResult.txid) {
+    txids.add(versioningOriginResult.txid);
   }
 
-  // Step 4: Calculate dependency waves
+  // Step 5: Calculate dependency waves and separate HTML files
   const { waves } = calculateDependencyWaves(graph);
-
-  // Step 4.5: Reorganize waves to ensure HTML is processed last
-  // This allows us to inscribe the Service Worker before HTML
-  const htmlWave: string[] = [];
+  const htmlFiles: string[] = [];
   const nonHtmlWaves: string[][] = [];
 
   for (const wave of waves) {
-    const htmlFiles = wave.filter((f) => isIndexHtmlFile(f));
-    const nonHtmlFiles = wave.filter((f) => !isIndexHtmlFile(f));
+    const waveHtmlFiles = wave.filter((f) => isIndexHtmlFile(f));
+    const waveNonHtmlFiles = wave.filter((f) => !isIndexHtmlFile(f));
 
-    if (htmlFiles.length > 0) {
-      htmlWave.push(...htmlFiles);
+    if (waveHtmlFiles.length > 0) {
+      htmlFiles.push(...waveHtmlFiles);
     }
-    if (nonHtmlFiles.length > 0) {
-      nonHtmlWaves.push(nonHtmlFiles);
+    if (waveNonHtmlFiles.length > 0) {
+      nonHtmlWaves.push(waveNonHtmlFiles);
     }
-  }
-
-  // Reconstruct waves: all non-HTML waves first, then HTML wave last
-  const reorganizedWaves = [...nonHtmlWaves];
-  if (htmlWave.length > 0) {
-    reorganizedWaves.push(htmlWave);
   }
 
   callbacks?.onProgress?.(
-    `📊 Wave structure: ${reorganizedWaves.length} wave(s), HTML in final wave`
+    `📊 Wave structure: ${nonHtmlWaves.length} wave(s), HTML inscribed separately`
   );
 
-  // Step 5: Process files wave by wave
-  const urlMap = new Map<string, string>();
-  // Pre-populate URL map with ALL cached files before any wave processing
-  // This ensures that files being rewritten can reference cached files from any wave
-  for (const [filePath, previousInscription] of previousInscriptions) {
-    if (cachedFiles.includes(filePath)) {
-      urlMap.set(filePath, previousInscription.urlPath);
-    }
-  }
-  const inscriptions: InscribedFile[] = [];
-  const allChunkManifests: ChunkManifest[] = [];
-  // Initialize with cached chunk manifests
-  allChunkManifests.push(...cachedChunkManifests);
-  let totalCost = 0;
-  let totalSize = 0;
-  const spentUtxos = new Set<string>(); // Track spent UTXOs across waves (format: txid:vout)
-  let serviceWorkerInscription: InscribedFile | undefined;
-
+  // Step 6: Process waves
   const jobContext: WaveJobContext = {
     buildDir,
     destinationAddress,
-    versioningOriginInscription: finalVersioningOriginInscription,
+    versioningOriginInscription: versioningOriginResult.finalVersioningOriginInscription,
     chunkThreshold: DEFAULT_CHUNK_THRESHOLD,
     chunkSize: DEFAULT_CHUNK_SIZE,
-    disableChunking: false, // Progressive chunking is always enabled
-    serviceWorkerUrl: undefined, // Will be set before HTML wave
+    disableChunking: false,
+    serviceWorkerUrl: undefined,
   };
 
-  for (let waveIndex = 0; waveIndex < reorganizedWaves.length; waveIndex++) {
-    const filesInWave = reorganizedWaves[waveIndex];
-    const isHtmlWave = filesInWave.some((f) => isIndexHtmlFile(f));
+  const urlMap = new Map<string, string>();
+  const spentUtxos = new Set<string>();
 
-    // If this is the HTML wave AND we have chunked files, inscribe Service Worker first
-    if (isHtmlWave && allChunkManifests.length > 0 && !serviceWorkerInscription) {
-      // Calculate total files including SW: regular files + versioning files + SW
-      const totalFilesIncludingSW = order.length + (VERSIONING_ENABLED ? 2 : 0) + 1;
-      const currentFileNumber = inscriptions.length + 1; // Current position
+  const waveResults = await processWaves(
+    nonHtmlWaves,
+    graph,
+    urlMap,
+    cacheAnalysis.cachedFiles,
+    cacheAnalysis.cachedChunkManifests,
+    previousInscriptions,
+    jobContext,
+    paymentPk,
+    indexer,
+    satsPerKb || DEFAULT_SATS_PER_KB,
+    dryRun || false,
+    versioningOriginResult.seedUtxo,
+    spentUtxos,
+    callbacks
+  );
 
-      // Generate service worker code
-      const swCode = generateChunkReassemblyServiceWorker(allChunkManifests, primaryContentUrl);
-      const swBuffer = Buffer.from(swCode, 'utf-8');
+  let totalCost = waveResults.totalCost;
+  let totalSize = waveResults.totalSize;
 
-      // Calculate contentHash for caching
-      const swContentHash = createHash('sha256').update(swBuffer).digest('hex');
+  // Add wave txids
+  for (const txid of waveResults.txids) {
+    txids.add(txid);
+  }
 
-      // Check if we can reuse a previous SW inscription
-      const previousSW = previousInscriptions.get('chunk-reassembly-sw.js');
-      const canReuseSW = previousSW && previousSW.contentHash === swContentHash;
-
-      if (canReuseSW && previousSW) {
-        // Reuse cached service worker
-        callbacks?.onInscriptionSkipped?.('chunk-reassembly-sw.js', previousSW.urlPath);
-
-        serviceWorkerInscription = { ...previousSW, cached: true };
-        inscriptions.push(serviceWorkerInscription);
-        // Note: Do NOT add cached SW txid or size to totals - it's from a previous deployment
-        jobContext.serviceWorkerUrl = previousSW.urlPath;
-
-        callbacks?.onProgress?.(
-          `  ✓ Service worker cached (hash: ${swContentHash.slice(0, 16)}...)`
-        );
-      } else {
-        // Inscribe new service worker
-        callbacks?.onInscriptionStart?.(
-          'chunk-reassembly-sw.js',
-          currentFileNumber,
-          totalFilesIncludingSW
-        );
-
-        const swJobs = [
-          {
-            id: 'service-worker',
-            type: 'bfile' as const,
-            filePath: '',
-            originalPath: 'chunk-reassembly-sw.js',
-            contentType: 'application/javascript',
-            content: swBuffer,
-            destinationAddress,
-          },
-        ];
-
-        const swInscriptionResult = await parallelInscribe(
-          swJobs,
-          paymentPk,
-          indexer,
-          satsPerKb || DEFAULT_SATS_PER_KB,
-          dryRun || false,
-          1,
-          undefined, // No seed UTXO for SW
-          spentUtxos,
-          callbacks?.onProgress
-        );
-
-        // Track split UTXO transaction for service worker (if any)
-        if (swInscriptionResult.splitTxid) {
-          txids.add(swInscriptionResult.splitTxid);
-        }
-
-        serviceWorkerInscription = {
-          ...swInscriptionResult.results[0].inscription,
-          contentHash: swContentHash, // Store hash for future caching
-        };
-        txids.add(serviceWorkerInscription.txid);
-        totalCost += swInscriptionResult.totalCost;
-
-        // Add Service Worker to inscriptions immediately (before HTML)
-        inscriptions.push(serviceWorkerInscription);
-        totalSize += serviceWorkerInscription.size;
-
-        // Update context with SW URL so HTML can reference it
-        jobContext.serviceWorkerUrl = serviceWorkerInscription.urlPath;
-
-        callbacks?.onInscriptionComplete?.(
-          'chunk-reassembly-sw.js',
-          serviceWorkerInscription.urlPath
-        );
-      }
-    }
-
-    callbacks?.onProgress?.(
-      `\n🌊 Wave ${waveIndex + 1}/${reorganizedWaves.length}: Processing ${filesInWave.length} file(s)...`
-    );
-
-    // Filter out cached files
-    const filesToInscribe = filesInWave.filter((filePath) => {
-      const node = graph.get(filePath);
-      if (!node) return true;
-
-      const fileRef = node.file;
-      const previousInscription = previousInscriptions.get(filePath);
-      const shouldReuse = canReuseInscription(filePath, fileRef, previousInscription, urlMap);
-
-      if (shouldReuse && previousInscription) {
-        inscriptions.push({ ...previousInscription, cached: true });
-        urlMap.set(filePath, previousInscription.urlPath);
-        // Note: Do NOT add cached file txids or sizes to totals - these are from previous deployments
-
-        // If this is a chunked file, note its chunk count
-        let chunkCount: number | undefined;
-        if (previousInscription.isChunked && previousInscription.chunks) {
-          chunkCount = previousInscription.chunks.length;
-          // Note: Manifest already added to allChunkManifests during cache analysis
-        }
-
-        callbacks?.onInscriptionSkipped?.(filePath, previousInscription.urlPath, chunkCount);
-        return false;
-      }
-
-      return true;
-    });
-
-    if (filesToInscribe.length === 0) {
-      callbacks?.onProgress?.(`  ✓ All files in this wave are cached, skipping...`);
-      continue;
-    }
-
-    // Prepare jobs for this wave (pass previousInscriptions to skip cached chunked files)
-    const jobs = await prepareWaveJobs(
-      filesToInscribe,
-      graph,
-      urlMap,
-      jobContext,
-      previousInscriptions
-    );
-
-    if (jobs.length === 0) {
-      continue;
-    }
-
-    // Inscribe all jobs in parallel
-    const inscriptionResult = await parallelInscribe(
-      jobs,
+  // Step 7: Inscribe Service Worker (if needed)
+  if (waveResults.allChunkManifests.length > 0) {
+    const swResult = await handleServiceWorkerInscription(
+      waveResults.allChunkManifests,
+      previousInscriptions,
+      primaryContentUrl,
       paymentPk,
       indexer,
+      destinationAddress,
       satsPerKb || DEFAULT_SATS_PER_KB,
       dryRun || false,
-      DEFAULT_CHUNK_BATCH_SIZE,
-      seedUtxo, // Pass seed UTXO for first wave to avoid indexer timing issues
-      spentUtxos, // Pass spent UTXOs from previous waves
-      callbacks?.onProgress
+      waveResults.inscriptions.length,
+      order.length + 2,
+      spentUtxos,
+      callbacks
     );
 
-    // Track split UTXO transaction (in chronological order before inscriptions)
-    if (inscriptionResult.splitTxid) {
-      txids.add(inscriptionResult.splitTxid);
+    waveResults.inscriptions.push(swResult.serviceWorkerInscription);
+    totalCost += swResult.totalCost;
+    if (!swResult.serviceWorkerInscription.cached) {
+      totalSize += swResult.serviceWorkerInscription.size;
+    }
+    if (swResult.splitTxid) {
+      txids.add(swResult.splitTxid);
+    }
+    if (swResult.serviceWorkerInscription.txid) {
+      txids.add(swResult.serviceWorkerInscription.txid);
     }
 
-    // Add cost from this wave
-    totalCost += inscriptionResult.totalCost;
-
-    // Clear seed UTXO after first wave (it's been used)
-    seedUtxo = undefined;
-
-    // Process results
-    // Note: chunkSize passed here is only for metadata - actual chunk sizes are stored in each chunk
-    const processed = processWaveResults(inscriptionResult.results, urlMap, jobContext.chunkSize);
-
-    // Add regular files to inscriptions
-    for (const inscribedFile of processed.regularFiles) {
-      const node = graph.get(inscribedFile.originalPath);
-      const fileRef = node?.file;
-
-      const hasDependencies = fileRef?.dependencies && fileRef.dependencies.length > 0;
-      const dependencyHash =
-        hasDependencies && fileRef
-          ? calculateDependencyHash(fileRef.dependencies, urlMap)
-          : undefined;
-
-      inscriptions.push({
-        ...inscribedFile,
-        dependencyHash,
-      });
-
-      txids.add(inscribedFile.txid);
-      totalSize += inscribedFile.size;
-      callbacks?.onInscriptionComplete?.(inscribedFile.originalPath, inscribedFile.urlPath);
-    }
-
-    // Handle chunked files
-    for (const [filePath, chunkedFileData] of processed.chunkedFiles.entries()) {
-      allChunkManifests.push(chunkedFileData.manifest);
-
-      // Get the original file's contentHash from the graph (calculated before chunking)
-      const node = graph.get(filePath);
-      const fileContentHash = node?.file?.contentHash || '';
-
-      // Build chunks array with full metadata
-      const chunksMetadata = chunkedFileData.chunks.map((chunkResult, index) => ({
-        index,
-        txid: chunkResult.inscription.txid,
-        vout: chunkResult.inscription.vout,
-        size: chunkResult.inscription.size,
-      }));
-
-      // Add the chunked file entry to inscriptions with full metadata
-      const chunkedFileInscription: InscribedFile = {
-        originalPath: filePath,
-        txid: chunkedFileData.manifest.chunks[0]?.txid || '', // Use first chunk's txid as primary
-        vout: 0,
-        urlPath: `/content/${chunkedFileData.manifest.chunks[0]?.txid}_0`, // Placeholder URL
-        size: chunkedFileData.totalSize,
-        contentHash: fileContentHash, // Use original file hash, not recalculated from chunks
-        isChunked: true,
-        chunkCount: chunkedFileData.chunks.length,
-        chunks: chunksMetadata,
-      };
-
-      inscriptions.push(chunkedFileInscription);
-
-      // Add individual chunk txids
-      for (const chunkResult of chunkedFileData.chunks) {
-        txids.add(chunkResult.inscription.txid);
-      }
-
-      totalSize += chunkedFileData.totalSize;
-      callbacks?.onInscriptionComplete?.(filePath, chunkedFileInscription.urlPath);
-    }
+    jobContext.serviceWorkerUrl = swResult.serviceWorkerInscription.urlPath;
   }
 
-  // Step 6: Find entry point
-  const entryPoint = inscriptions.find((i) => isIndexHtmlFile(i.originalPath));
-  if (!entryPoint) {
-    throw new Error('No index.html found in build directory');
+  // Step 8: Inscribe HTML as 1-sat ordinal chain
+  const htmlResult = await handleHtmlInscription(
+    htmlFiles,
+    graph,
+    buildDir,
+    urlMap,
+    versioningOriginResult.finalVersioningOriginInscription,
+    jobContext.serviceWorkerUrl,
+    htmlOriginInscription,
+    paymentPk,
+    indexer,
+    destinationAddress,
+    satsPerKb,
+    dryRun || false,
+    version,
+    callbacks
+  );
+
+  waveResults.inscriptions.push(htmlResult.entryPoint);
+  totalSize += htmlResult.entryPoint.size;
+  if (htmlResult.txid) {
+    txids.add(htmlResult.txid);
   }
 
-  // Step 7: Update versioning inscription
-  let latestVersioningInscription: string | undefined;
+  // Step 9: Update versioning inscription
+  const versioningMetadataResult = await handleVersioningMetadataUpdate(
+    versioningOriginResult.finalVersioningOriginInscription,
+    versioningOriginInscription,
+    htmlResult.entryPoint,
+    paymentPk,
+    version,
+    versionDescription,
+    destinationAddress,
+    satsPerKb,
+    dryRun || false,
+    callbacks
+  );
 
-  if (finalVersioningOriginInscription && VERSIONING_ENABLED && !dryRun) {
-    try {
-      const entryPointOutpoint = extractOutpointFromFile(entryPoint);
-      latestVersioningInscription = await updateVersioningInscription(
-        versioningOriginInscription || finalVersioningOriginInscription,
-        paymentPk,
-        paymentPk,
-        version,
-        entryPointOutpoint,
-        versionDescription || `Version ${version}`,
-        destinationAddress,
-        satsPerKb
-      );
-      const metadataTxid = latestVersioningInscription.split(OUTPOINT_SEPARATOR)[0];
-      txids.add(metadataTxid);
-      callbacks?.onInscriptionComplete?.(
-        VERSIONING_METADATA_TYPE,
-        `${CONTENT_PATH_PREFIX}${latestVersioningInscription}`
-      );
-    } catch (error) {
-      console.error('❌ Failed to update versioning inscription');
-      throw error;
-    }
+  if (versioningMetadataResult.txid) {
+    txids.add(versioningMetadataResult.txid);
   }
 
-  callbacks?.onDeploymentComplete?.(entryPoint.urlPath);
-
-  if (!finalVersioningOriginInscription) {
-    throw new Error('Versioning inscription origin was not set');
-  }
+  callbacks?.onDeploymentComplete?.(htmlResult.entryPoint.urlPath);
 
   return {
-    entryPointUrl: entryPoint.urlPath,
-    inscriptions,
+    entryPointUrl: htmlResult.entryPoint.urlPath,
+    inscriptions: waveResults.inscriptions,
     totalCost,
     totalSize,
     txids: Array.from(txids),
-    versioningOriginInscription: finalVersioningOriginInscription,
-    versioningLatestInscription: latestVersioningInscription,
+    versioningOriginInscription: versioningOriginResult.finalVersioningOriginInscription,
+    versioningLatestInscription: versioningMetadataResult.latestVersioningInscription,
+    htmlOriginInscription: htmlResult.finalHtmlOriginInscription,
+    htmlLatestInscription: extractOutpointFromFile(htmlResult.entryPoint),
     version,
     versionDescription,
     buildDir,
@@ -716,7 +377,10 @@ export async function deployToChain(
   };
 }
 
-// Keep existing manifest generation functions
+// ============================================================================
+// Manifest Functions
+// ============================================================================
+
 export function generateManifest(result: DeploymentResult): DeploymentManifest {
   const newFiles = result.inscriptions.filter((f) => !f.cached);
   const cachedFilesFull = result.inscriptions.filter((f) => f.cached);
@@ -736,6 +400,7 @@ export function generateManifest(result: DeploymentResult): DeploymentManifest {
     totalSize: result.totalSize,
     transactions: result.txids,
     latestVersioningInscription: result.versioningLatestInscription,
+    latestHtmlInscription: result.htmlLatestInscription,
     version: result.version,
     versionDescription: result.versionDescription,
     buildDir: result.buildDir,
@@ -758,7 +423,8 @@ export async function saveManifest(
 export async function saveManifestWithHistory(
   manifest: DeploymentManifest,
   outputPath: string,
-  originVersioningInscription: string
+  originVersioningInscription: string,
+  originHtmlInscription?: string
 ): Promise<DeploymentManifestHistory> {
   let history: DeploymentManifestHistory;
 
@@ -769,30 +435,41 @@ export async function saveManifestWithHistory(
 
       if ('manifestVersion' in parsed && 'deployments' in parsed) {
         history = parsed as DeploymentManifestHistory;
+
         history.deployments.push(manifest);
         history.totalDeployments = history.deployments.length;
         if (!history.originVersioningInscription) {
           history.originVersioningInscription = originVersioningInscription;
         }
+        if (!history.originHtmlInscription && originHtmlInscription) {
+          history.originHtmlInscription = originHtmlInscription;
+        }
       } else if ('timestamp' in parsed && 'entryPoint' in parsed) {
         const oldManifest = parsed as DeploymentManifest;
 
-        const { originVersioningInscription, ...cleanedOldManifest } =
-          oldManifest as DeploymentManifest & { originVersioningInscription?: string };
+        const {
+          originVersioningInscription,
+          originHtmlInscription: oldHtmlOrigin,
+          ...cleanedOldManifest
+        } = oldManifest as DeploymentManifest & {
+          originVersioningInscription?: string;
+          originHtmlInscription?: string;
+        };
         history = {
           manifestVersion: MANIFEST_VERSION,
           originVersioningInscription: originVersioningInscription,
+          originHtmlInscription: originHtmlInscription || oldHtmlOrigin,
           totalDeployments: 2,
           deployments: [cleanedOldManifest, manifest],
         };
       } else {
-        history = createNewHistory(manifest, originVersioningInscription);
+        history = createNewHistory(manifest, originVersioningInscription, originHtmlInscription);
       }
     } catch {
-      history = createNewHistory(manifest, originVersioningInscription);
+      history = createNewHistory(manifest, originVersioningInscription, originHtmlInscription);
     }
   } else {
-    history = createNewHistory(manifest, originVersioningInscription);
+    history = createNewHistory(manifest, originVersioningInscription, originHtmlInscription);
   }
 
   const json = JSON.stringify(history, null, 2);
@@ -803,11 +480,13 @@ export async function saveManifestWithHistory(
 
 function createNewHistory(
   manifest: DeploymentManifest,
-  originVersioningInscription: string
+  originVersioningInscription: string,
+  originHtmlInscription?: string
 ): DeploymentManifestHistory {
   return {
     manifestVersion: MANIFEST_VERSION,
     originVersioningInscription: originVersioningInscription,
+    originHtmlInscription,
     totalDeployments: 1,
     deployments: [manifest],
   };

@@ -56,6 +56,10 @@ export interface DeploymentResult {
   versioningOriginInscription: string;
   /** Latest versioning inscription outpoint after this deployment */
   versioningLatestInscription?: string;
+  /** HTML inscription origin outpoint (never changes, used for :-1 resolution) */
+  htmlOriginInscription?: string;
+  /** Latest HTML inscription outpoint after this deployment (from HTML chain) */
+  htmlLatestInscription?: string;
   /** Version deployed */
   version: string;
   /** Version description/changelog */
@@ -85,6 +89,8 @@ export interface DeploymentManifest {
   transactions: string[];
   /** Latest versioning inscription outpoint after this deployment */
   latestVersioningInscription?: string;
+  /** Latest HTML inscription outpoint after this deployment (from HTML chain) */
+  latestHtmlInscription?: string;
   /** Version deployed */
   version: string;
   /** Version description/changelog */
@@ -113,6 +119,8 @@ export interface DeploymentManifestHistory {
   projectName?: string;
   /** Origin outpoint of the versioning inscription chain (never changes, if versioning enabled) */
   originVersioningInscription?: string;
+  /** Origin outpoint of the HTML inscription chain (never changes, used for :-1 resolution) */
+  originHtmlInscription?: string;
   /** Total number of deployments */
   totalDeployments: number;
   /** Array of all deployments (chronological order) */

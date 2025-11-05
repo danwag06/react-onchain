@@ -36,55 +36,69 @@ export class GorillaPoolIndexer extends IndexerService {
   }
 
   /**
-   * Get version metadata from the latest inscription in the origin chain
+   * Fetch the latest inscription in an origin chain using :-1 resolution
+   * Generic method that works for any origin chain (versioning, HTML, etc.)
    *
-   * @param versionInscriptionOrigin - The origin outpoint of the versioning inscription
-   * @param contentUrl - Optional content service URL (defaults to GORILLA_POOL_CONTENT_URL)
-   * @returns Parsed metadata object with version:outpoint mappings
+   * @param origin - The origin outpoint (txid_vout)
+   * @param options - Fetch options
+   * @param options.includeUtxo - Whether to fetch UTXO details (for spending in next deployment)
+   * @param options.includeMap - Whether to fetch metadata from x-map header
+   * @returns The latest inscription details
    */
-  async fetchLatestVersionMetadata(
-    versionInscriptionOrigin: string,
-    includeUtxo: boolean
-  ): Promise<{ metadata: VersionMetadata; utxo: Utxo | null }> {
+  async fetchLatestFromOrigin(
+    origin: string,
+    options: { includeUtxo: boolean; includeMap: boolean }
+  ): Promise<{ metadata: VersionMetadata | null; utxo: Utxo | null }> {
     try {
-      // Construct the URL to fetch the latest version metadata seq=-1 and map=true to get latest and metadata
-      const url = `${this.contentUrl}/content/${versionInscriptionOrigin}:-1?map=true&out=${includeUtxo ? 'true' : 'false'}`;
+      // Build query params based on options
+      const params = new URLSearchParams();
+      if (options.includeMap) {
+        params.append('map', 'true');
+      }
+      if (options.includeUtxo) {
+        params.append('out', 'true');
+      }
 
+      const url = `${this.contentUrl}/content/${origin}:-1?${params.toString()}`;
       const response = await fetch(url, { method: 'HEAD' });
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch metadata: HTTP ${response.status}`);
+        throw new Error(`Failed to fetch from origin: HTTP ${response.status}`);
       }
 
-      // Read x-map header
-      const mapHeader = response.headers.get('x-map');
-
-      if (!mapHeader) {
-        throw new Error('No version metadata found in inscription');
+      // Parse metadata if requested
+      let metadata: VersionMetadata | null = null;
+      if (options.includeMap) {
+        const mapHeader = response.headers.get('x-map');
+        if (!mapHeader) {
+          throw new Error('No metadata found in inscription');
+        }
+        metadata = JSON.parse(mapHeader) as VersionMetadata;
       }
 
-      // Parse JSON metadata
-      const metadata = JSON.parse(mapHeader) as VersionMetadata;
-      const output = includeUtxo ? response.headers.get('x-output') : null;
-      const outpoint = includeUtxo ? response.headers.get('x-outpoint') : null;
-      const parsedOutput = output ? this.parseOutput(output) : null;
+      // Parse UTXO if requested
+      let utxo: Utxo | null = null;
+      if (options.includeUtxo) {
+        const output = response.headers.get('x-output');
+        const outpoint = response.headers.get('x-outpoint');
+        const parsedOutput = output ? this.parseOutput(output) : null;
 
-      let utxo = null;
-      if (includeUtxo) {
-        // Handle both underscore (txid_vout) and dot (txid.vout) notation
-        const separator = outpoint?.includes('_') ? '_' : '.';
-        utxo = {
-          txid: outpoint?.split(separator)[0] || '',
-          vout: parseInt(outpoint?.split(separator)[1] ?? '0'),
-          satoshis: parsedOutput?.satoshis ?? 1,
-          script: parsedOutput?.script || '',
-        };
+        if (outpoint && parsedOutput) {
+          // Handle both underscore (txid_vout) and dot (txid.vout) notation
+          const separator = outpoint.includes('_') ? '_' : '.';
+          utxo = {
+            txid: outpoint.split(separator)[0] || '',
+            vout: parseInt(outpoint.split(separator)[1] ?? '0'),
+            satoshis: parsedOutput.satoshis ?? 1,
+            script: parsedOutput.script || '',
+          };
+        }
       }
 
       return { metadata, utxo };
     } catch (error) {
-      console.error('Failed to get version metadata:', formatError(error));
-      throw new Error(`Getting version metadata failed: ${formatError(error)}`);
+      console.error('Failed to fetch from origin:', formatError(error));
+      throw new Error(`Fetching from origin failed: ${formatError(error)}`);
     }
   }
 
