@@ -17,7 +17,7 @@ import { CONTENT_TYPE_MAP } from '../../../core/analysis/analyzer.js';
 
 interface InscribeOptions {
   paymentKey?: string;
-  protocol: '1sat' | 'bfile';
+  protocol: '1sat' | 'b';
   destination?: string;
   satsPerKb: string;
   contentType?: string;
@@ -33,8 +33,8 @@ export function registerInscribeCommand(program: Command): void {
     .option('-p, --payment-key <wif>', 'Payment private key (WIF format)', envConfig.paymentKey)
     .option(
       '--protocol <type>',
-      'Inscription protocol: 1sat (1Sat Ordinals) or bfile (B:// protocol)',
-      '1sat'
+      'Inscription protocol: b (B:// protocol) or 1sat (1Sat Ordinals)',
+      'b'
     )
     .option('-d, --destination <address>', 'Destination address (defaults to payment key address)')
     .option('-s, --sats-per-kb <number>', 'Satoshis per KB for fees', String(envConfig.satsPerKb))
@@ -62,9 +62,9 @@ export function registerInscribeCommand(program: Command): void {
         }
 
         // Validate protocol
-        if (options.protocol !== '1sat' && options.protocol !== 'bfile') {
+        if (options.protocol !== '1sat' && options.protocol !== 'b') {
           console.error(chalk.red(`\n❌ Invalid protocol: ${options.protocol}`));
-          console.error(chalk.yellow('Must be either "1sat" or "bfile"\n'));
+          console.error(chalk.yellow('Must be either "b" or "1sat"\n'));
           process.exit(1);
         }
 
@@ -95,7 +95,7 @@ export function registerInscribeCommand(program: Command): void {
         // Create inscription job
         const job: InscriptionJob = {
           id: fileName,
-          type: options.protocol === '1sat' ? 'ordinal' : 'bfile',
+          type: options.protocol === '1sat' ? 'ordinal' : 'bfile', // Map 'b' to 'bfile' internally
           filePath: absolutePath,
           originalPath: fileName,
           content,
@@ -120,7 +120,10 @@ export function registerInscribeCommand(program: Command): void {
           console.log(chalk.green('\n✅ Inscription Complete!\n'));
           console.log(chalk.white('Transaction ID:'), chalk.cyan(inscription.txid));
           console.log(chalk.white('Outpoint:'), chalk.cyan(outpoint));
-          console.log(chalk.white('URL:'), chalk.cyan(`https://ordfs.network/content/${outpoint}`));
+          console.log(
+            chalk.white('URL:'),
+            chalk.cyan(`https://app.reactonchain.com/content/${outpoint}`)
+          );
           console.log(chalk.white('Total Cost:'), chalk.green(`${result.totalCost} satoshis`));
           console.log('');
         } else {

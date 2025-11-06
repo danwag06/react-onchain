@@ -127,7 +127,7 @@ The destination address is automatically derived from your payment key.
 The CLI will output the entry point URL. For example, using ordfs.network as a content provider:
 
 ```
-https://ordfs.network/content/<txid>_<vout>
+https://app.reactonchain.com/content/<txid>_<vout>
 ```
 
 After your first deployment, a `.env` file is automatically created with your configuration. This means subsequent deployments are even simpler - just run:
@@ -152,6 +152,9 @@ All configuration is automatically managed for you!
 ```bash
 # Deploy application (interactive prompts)
 npx react-onchain deploy
+
+# Inscribe a single file
+npx react-onchain inscribe <file>
 
 # Query version history (on-chain)
 npx react-onchain version:history [versioningOriginInscription]
@@ -256,6 +259,97 @@ npx react-onchain deploy --sats-per-kb 100
 ```
 
 **Note:** When flags are provided, interactive prompts are automatically skipped. This is perfect for CI/CD automation.
+
+### Inscribe Command
+
+The `inscribe` command allows you to inscribe individual files to the BSV blockchain. Unlike the `deploy` command which handles entire React applications, `inscribe` is a lower-level utility for inscribing single files directly.
+
+#### Usage
+
+```bash
+npx react-onchain inscribe <file> [options]
+```
+
+#### Options
+
+| Flag                      | Short | Description                                             | Default                       |
+| ------------------------- | ----- | ------------------------------------------------------- | ----------------------------- |
+| `--payment-key <wif>`     | `-p`  | Payment private key in WIF format                       | From `PAYMENT_KEY` in .env    |
+| `--protocol <type>`       |       | Protocol: `b` (B:// protocol) or `1sat` (1Sat Ordinals) | `b`                           |
+| `--destination <address>` | `-d`  | Destination address for the inscription                 | Payment key address           |
+| `--sats-per-kb <number>`  | `-s`  | Satoshis per KB for transaction fees                    | From config (defaults to env) |
+| `--content-type <type>`   | `-t`  | MIME content type                                       | Auto-detected from extension  |
+
+#### Examples
+
+**Basic usage (with .env configuration):**
+
+```bash
+npx react-onchain inscribe ./image.png
+```
+
+**Inscribe with all options specified:**
+
+```bash
+npx react-onchain inscribe ./document.pdf \
+  --payment-key "your-wif-key-here" \
+  --protocol b \
+  --destination "1A2B3C..." \
+  --sats-per-kb 50 \
+  --content-type "application/pdf"
+```
+
+**Using 1Sat Ordinals protocol:**
+
+```bash
+npx react-onchain inscribe ./rare-nft.png --protocol 1sat
+```
+
+**Inscribe a video file:**
+
+```bash
+npx react-onchain inscribe ./video.mp4 --sats-per-kb 10
+```
+
+#### Supported File Types
+
+The command auto-detects content types for 40+ file extensions:
+
+- **Web**: `.html`, `.css`, `.js`, `.mjs`, `.json`, `.webmanifest`
+- **Images**: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.ico`, `.bmp`, `.tiff`
+- **Fonts**: `.woff`, `.woff2`, `.ttf`, `.eot`, `.otf`
+- **Video**: `.mp4`, `.webm`, `.mov`, `.avi`, `.mkv`, `.m4v`, `.ogg`
+- **Audio**: `.mp3`, `.wav`, `.m4a`, `.aac`, `.flac`, `.ogg`
+- **Documents**: `.pdf`, `.txt`, `.xml`, `.csv`, `.md`
+- **Other**: `.wasm`, `.zip`, `.tar`, `.gz`, `.7z`
+
+For unknown extensions, it defaults to `application/octet-stream`.
+
+#### Output
+
+The command displays:
+
+- File information (name, path, size, content type)
+- Protocol and destination details
+- Fee rate
+- Inscription progress
+- Success message with:
+  - Transaction ID
+  - Outpoint (txid_vout)
+  - Content URL (e.g., on ordfs.network)
+  - Total cost in satoshis
+
+#### Use Cases
+
+The `inscribe` command is useful for:
+
+- Inscribing individual assets or files
+- Testing inscription functionality
+- Creating standalone inscriptions outside of full app deployments
+- Inscribing files using the B:// protocol (default) or 1Sat Ordinals
+- Quick one-off inscriptions without needing a full project structure
+
+This is a simpler, more direct alternative to the `deploy` command when you just need to put a single file on-chain.
 
 ## Deployment Output
 

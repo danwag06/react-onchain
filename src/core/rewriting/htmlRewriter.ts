@@ -264,7 +264,7 @@ export async function injectVersionScript(
 /**
  * Injects the base path fix script into HTML content
  * This is a static script (same for all apps), referenced externally from permanent inscription
- * This script automatically detects ordfs deployment paths and sets the correct base href
+ * This script automatically detects deployment paths and sets the correct base href
  * for React Router and other client-side routing libraries
  *
  * @param htmlContent - Original HTML content
