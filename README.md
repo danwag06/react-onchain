@@ -1,6 +1,8 @@
-# react-onchain
+<img src="https://github.com/user-attachments/assets/3c16a857-5b1a-40a9-90a6-4a569f736aae" width="50" />
 
-<img width="1600" height="900" alt="react-onchain-social-share" src="https://github.com/user-attachments/assets/533cd9bc-2f5f-4363-a9ff-3b1042d09dd5" />
+# React Onchain
+
+<img width="1280" height="720" alt="React Onchain Social Share" src="https://github.com/user-attachments/assets/b0d8c986-717e-422b-80db-ee1ffc613a16" />
 
 ## Overview
 
