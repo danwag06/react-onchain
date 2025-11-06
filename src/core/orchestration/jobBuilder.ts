@@ -182,8 +182,7 @@ export async function prepareWaveJobs(
   filesInWave: string[],
   graph: Map<string, DependencyNode>,
   urlMap: Map<string, string>,
-  context: WaveJobContext,
-  previousInscriptions?: Map<string, InscribedFile>
+  context: WaveJobContext
 ): Promise<InscriptionJob[]> {
   const jobs: InscriptionJob[] = [];
 
@@ -193,14 +192,6 @@ export async function prepareWaveJobs(
 
     const fileRef: FileReference = node.file;
     const fileSize = fileRef.fileSize;
-
-    // Check if this file is cached (should have been filtered out already, but double-check)
-    const previousInscription = previousInscriptions?.get(filePath);
-    if (previousInscription && previousInscription.isChunked) {
-      // File is cached and chunked - skip job creation entirely
-      // The wave processing already added it to inscriptions with cached: true
-      continue;
-    }
 
     // Prepare file content (rewrites, script injection, etc.)
     const content = await prepareFileContent(

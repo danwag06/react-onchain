@@ -36,6 +36,24 @@ export class GorillaPoolIndexer extends IndexerService {
   }
 
   /**
+   * Fetch the output of an origin
+   * @param origin - The origin outpoint (txid_vout)
+   * @returns The output of the origin in base64
+   */
+  private async fetchOutput(origin: string): Promise<string> {
+    const txid = origin.split('_')[0];
+    const vout = origin.split('_')[1];
+    const url = `${this.contentUrl}/v2/tx/${txid}/${vout}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch from origin: HTTP ${response.status}`);
+    }
+    const body = await response.arrayBuffer();
+    const bodyBase64 = Buffer.from(new Uint8Array(body)).toString('base64');
+    return bodyBase64;
+  }
+
+  /**
    * Fetch the latest inscription in an origin chain using :-1 resolution
    * Generic method that works for any origin chain (versioning, HTML, etc.)
    *
@@ -54,9 +72,6 @@ export class GorillaPoolIndexer extends IndexerService {
       const params = new URLSearchParams();
       if (options.includeMap) {
         params.append('map', 'true');
-      }
-      if (options.includeUtxo) {
-        params.append('out', 'true');
       }
 
       const url = `${this.contentUrl}/content/${origin}:-1?${params.toString()}`;
@@ -79,8 +94,11 @@ export class GorillaPoolIndexer extends IndexerService {
       // Parse UTXO if requested
       let utxo: Utxo | null = null;
       if (options.includeUtxo) {
-        const output = response.headers.get('x-output');
         const outpoint = response.headers.get('x-outpoint');
+        if (!outpoint) {
+          throw new Error('No x-outpoint header found');
+        }
+        const output = await this.fetchOutput(outpoint);
         const parsedOutput = output ? this.parseOutput(output) : null;
 
         if (outpoint && parsedOutput) {

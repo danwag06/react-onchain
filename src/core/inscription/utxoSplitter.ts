@@ -126,8 +126,13 @@ export async function splitUtxoForParallelInscription(
     // If we have a seed UTXO but it's insufficient, combine it with fetched UTXOs
     if (seedUtxo) {
       // Filter out any UTXOs with null satoshis (not fully indexed yet)
+      // AND filter out the seed UTXO itself to avoid duplicates
       const validFetchedUtxos = fetchedUtxos.filter(
-        (utxo) => utxo && utxo.satoshis !== null && utxo.satoshis !== undefined
+        (utxo) =>
+          utxo &&
+          utxo.satoshis !== null &&
+          utxo.satoshis !== undefined &&
+          !(utxo.txid === seedUtxo.txid && utxo.vout === seedUtxo.vout)
       );
       sourceUtxos = [seedUtxo, ...validFetchedUtxos];
     } else {

@@ -123,13 +123,7 @@ export async function processWaves(
     }
 
     // Prepare jobs for this wave (pass previousInscriptions to skip cached chunked files)
-    const jobs = await prepareWaveJobs(
-      filesToInscribe,
-      graph,
-      urlMap,
-      jobContext,
-      previousInscriptions
-    );
+    const jobs = await prepareWaveJobs(filesToInscribe, graph, urlMap, jobContext);
 
     if (jobs.length === 0) {
       continue;

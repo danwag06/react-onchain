@@ -1,6 +1,6 @@
 {
   "name": "react-onchain",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "description": "Deploy applications to the BSV blockchain.",
   "main": "dist/index.js",
   "type": "module",
