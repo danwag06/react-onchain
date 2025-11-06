@@ -5,6 +5,7 @@
 
 import { existsSync } from 'fs';
 import { resolve } from 'path';
+import { execSync } from 'child_process';
 import chalk from 'chalk';
 import { input, password, confirm } from '@inquirer/prompts';
 import { promptForBuildDir, promptForVersion } from '../../utils.js';
@@ -162,6 +163,22 @@ export async function promptAppName(
 }
 
 /**
+ * Get the latest git commit message
+ */
+function getLatestCommitMessage(): string | undefined {
+  try {
+    const message = execSync('git log -1 --pretty=%B', {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'], // Suppress stderr
+    }).trim();
+    return message || undefined;
+  } catch {
+    // Not a git repo or git not available
+    return undefined;
+  }
+}
+
+/**
  * Prompt for version description
  */
 export async function promptVersionDescription(
@@ -172,10 +189,14 @@ export async function promptVersionDescription(
     return 'Dry run deployment';
   }
 
+  // Get default: latest commit message, or 'Initial release' for first deployment
+  const commitMessage = getLatestCommitMessage();
+  const defaultDescription = commitMessage || (isFirstDeployment ? 'Initial release' : undefined);
+
   try {
     return await input({
       message: 'Version description:',
-      default: isFirstDeployment ? 'Initial release' : undefined,
+      default: defaultDescription,
     });
   } catch {
     console.error(chalk.red('\nVersion description input cancelled.'));
