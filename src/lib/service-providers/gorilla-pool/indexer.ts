@@ -6,7 +6,7 @@
 import axios from 'axios';
 import { IndexerService, GorillaPoolUtxo, UtxoQueryOptions } from '../IndexerService.js';
 import { GORILLA_POOL_INDEXER_URL, GORILLA_POOL_CONTENT_URL } from './constants.js';
-import { Utils } from '@bsv/sdk';
+import { P2PKH, Utils } from '@bsv/sdk';
 import { VersionMetadata } from '../../../core/versioning/index.js';
 import { Utxo } from 'js-1sat-ord';
 import { formatError } from '../../../utils/errors.js';
@@ -165,7 +165,7 @@ export class GorillaPoolIndexer extends IndexerService {
    * @param options - Query options (optional)
    * @param type - Filter by UTXO type: 'pay' (>1 sat), 'ordinal' (1 sat), or undefined (all)
    */
-  async listUnspent(address: string, options?: UtxoQueryOptions): Promise<Utxo[]> {
+  async listUnspentPaymentUtxos(address: string, options?: UtxoQueryOptions): Promise<Utxo[]> {
     const limit = 100; // GorillaPool API pagination limit
     let from = 0;
     const allSpendableUtxos: Utxo[] = [];
@@ -179,8 +179,9 @@ export class GorillaPoolIndexer extends IndexerService {
     }
 
     // Fetch UTXOs in batches until we have enough or no more are available
+    let firstPass = true;
     while (true) {
-      const url = `${this.baseUrl}/v5/evt/p2pkh/own/${address}?unspent=true&txo=true&script=true&from=${from}&limit=${limit}`;
+      const url = `${this.baseUrl}/v5/own/${address}/utxos?txo=true&from=${from}&limit=${limit}&refresh=${firstPass}`;
       const response = await axios.get(url);
       const utxo = response.data as GorillaPoolUtxo[];
 
@@ -194,7 +195,7 @@ export class GorillaPoolIndexer extends IndexerService {
         txid: u.outpoint.split('_')[0],
         vout: parseInt(u.outpoint.split('_')[1]),
         satoshis: u.satoshis,
-        script: u.script,
+        script: Utils.toBase64(new P2PKH().lock(address).toBinary()),
       })) as Utxo[];
 
       // Filter based on type parameter
@@ -232,6 +233,7 @@ export class GorillaPoolIndexer extends IndexerService {
 
       // Move to next page
       from = utxo[utxo.length - 1].score;
+      firstPass = false;
     }
 
     // If no options provided, return all spendable UTXOs

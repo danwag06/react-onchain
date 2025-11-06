@@ -92,7 +92,7 @@ export abstract class IndexerService {
    * @param type - Filter by UTXO type: 'pay' (>1 sat), 'ordinal' (1 sat), or undefined (all)
    * @returns Array of unspent UTXOs
    */
-  abstract listUnspent(address: string, options?: UtxoQueryOptions): Promise<Utxo[]>;
+  abstract listUnspentPaymentUtxos(address: string, options?: UtxoQueryOptions): Promise<Utxo[]>;
 
   /**
    * Get the base URL for this indexer service

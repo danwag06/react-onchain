@@ -80,7 +80,7 @@ export async function deployVersioningInscription(
         const paymentAddress = paymentKey.toAddress().toString();
 
         // Fetch payment UTXOs (filtering for 'pay' type to exclude ordinals)
-        const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined);
+        const paymentUtxos = await indexer.listUnspentPaymentUtxos(paymentAddress);
 
         if (paymentUtxos.length === 0) {
           throw new Error(
@@ -200,7 +200,7 @@ export async function updateVersioningInscription(
           );
         }
 
-        const paymentUtxos = await indexer.listUnspent(paymentAddress);
+        const paymentUtxos = await indexer.listUnspentPaymentUtxos(paymentAddress);
 
         if (paymentUtxos.length === 0) {
           throw new Error(

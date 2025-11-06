@@ -109,7 +109,7 @@ export async function splitUtxoForParallelInscription(
   } else {
     // Fetch UTXOs from indexer
     onProgress?.(`Fetching UTXOs from indexer (need ${totalRequired.toLocaleString()} sats)...`);
-    const fetchedUtxos = await indexer.listUnspent(paymentAddress, {
+    const fetchedUtxos = await indexer.listUnspentPaymentUtxos(paymentAddress, {
       unspentValue: totalOutputSats,
       estimateSize: estimatedTxSize,
       feePerKb: satsPerKb,

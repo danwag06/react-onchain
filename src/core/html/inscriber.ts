@@ -152,7 +152,7 @@ export async function createInitialHtmlOrdinal(
         const paymentAddress = paymentKey.toAddress().toString();
 
         // Fetch payment UTXOs
-        const paymentUtxos = await indexer.listUnspent(paymentAddress, undefined);
+        const paymentUtxos = await indexer.listUnspentPaymentUtxos(paymentAddress);
 
         if (paymentUtxos.length === 0) {
           throw new Error(
@@ -259,7 +259,7 @@ export async function updateHtmlOrdinal(
         }
 
         // Fetch payment UTXOs
-        const paymentUtxos = await indexer.listUnspent(paymentAddress);
+        const paymentUtxos = await indexer.listUnspentPaymentUtxos(paymentAddress);
 
         if (paymentUtxos.length === 0) {
           throw new Error(
