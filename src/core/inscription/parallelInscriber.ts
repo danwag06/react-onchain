@@ -540,12 +540,9 @@ async function buildAndBroadcastInBatches(
 
   // Detect if this is a chunked file
   const isChunked = jobs.length > 1 && jobs[0].chunkIndex !== undefined;
-  const fileName = isChunked ? jobs[0].originalPath.replace(/\.chunk\d+$/, '') : null;
 
   if (isChunked) {
-    onProgress?.(
-      `Processing large file: ${fileName} (${totalJobs} chunks in ${batchCount} batches)`
-    );
+    onProgress?.(`Processing large files (${totalJobs} chunks in ${batchCount} batches)`);
   } else {
     onProgress?.(`Processing ${totalJobs} file(s) in ${batchCount} batch(es)`);
   }
@@ -557,7 +554,7 @@ async function buildAndBroadcastInBatches(
     const batchUtxos = utxos.slice(batchStart, batchEnd);
 
     if (isChunked) {
-      onProgress?.(`Building chunks ${batchStart + 1}-${batchEnd} for ${fileName}...`);
+      onProgress?.(`Building chunks ${batchStart + 1}-${batchEnd} of ${totalJobs}...`);
     } else {
       onProgress?.(`Building batch ${batchIndex + 1}/${batchCount}...`);
     }
@@ -575,9 +572,7 @@ async function buildAndBroadcastInBatches(
     }
 
     if (isChunked) {
-      onProgress?.(
-        `Broadcasting chunks ${batchStart + 1}-${batchEnd} of ${totalJobs} for ${fileName}...`
-      );
+      onProgress?.(`Broadcasting chunks ${batchStart + 1}-${batchEnd} of ${totalJobs}...`);
     } else {
       onProgress?.(`Broadcasting batch ${batchIndex + 1}/${batchCount}...`);
     }
