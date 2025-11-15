@@ -34,7 +34,7 @@ export const CACHED_FILE_DELIMITER = ':::';
 // Defaults
 // ============================================================================
 
-export const DEFAULT_SATS_PER_KB = 1;
+export const DEFAULT_SATS_PER_KB = 100;
 export const DEFAULT_INSCRIPTION_VOUT = 0;
 export const INSCRIPTION_DELAY_MS = 1000;
 export const MANIFEST_VERSION = '1.0.0';

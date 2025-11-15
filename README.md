@@ -200,7 +200,7 @@ The CLI will:
 📋 Deployment Configuration
 ──────────────────────────────────────
   Build directory: ./dist
-  Fee rate:        1 sats/KB
+  Fee rate:        100 sats/KB
   Version:         1.0.0
   Description:     Initial release
   App name:        MyDApp (new versioning inscription)
@@ -227,7 +227,7 @@ For automation or CI/CD pipelines, you can bypass interactive prompts using flag
 | -------------------------------- | ----- | ------------------------------------------------------------ | -------- |
 | `--build-dir <directory>`        | `-b`  | Build directory to deploy                                    | `./dist` |
 | `--payment-key <wif>`            | `-p`  | Payment private key in WIF format (destination auto-derived) | Prompted |
-| `--sats-per-kb <number>`         | `-s`  | Satoshis per KB for fees                                     | `1`      |
+| `--sats-per-kb <number>`         | `-s`  | Satoshis per KB for fees                                     | `100`    |
 | `--dry-run`                      |       | Test deployment without broadcasting                         | `false`  |
 | `--version-tag <string>`         |       | Version identifier (e.g., "1.0.0")                           | Prompted |
 | `--version-description <string>` |       | Changelog or release notes                                   | Prompted |
@@ -645,14 +645,14 @@ Inscription costs depend on:
 - Total size of all files
 - Fee rate (sats/KB)
 
-Typical costs at 1 sat/KB:
+Typical costs at 100 sats/KB:
 
 | App Type    | Size   | Files  | Cost (sats) | Cost (USD)\* |
 | ----------- | ------ | ------ | ----------- | ------------ |
-| Simple SPA  | 200 KB | 5-10   | ~200        | ~$0.00008    |
-| Medium App  | 500 KB | 20-30  | ~500        | ~$0.0002     |
-| Large App   | 1 MB   | 50-100 | ~1,000      | ~$0.0004     |
-| Complex App | 2 MB   | 100+   | ~2,000      | ~$0.0008     |
+| Simple SPA  | 200 KB | 5-10   | ~20,000     | ~$0.008      |
+| Medium App  | 500 KB | 20-30  | ~50,000     | ~$0.02       |
+| Large App   | 1 MB   | 50-100 | ~100,000    | ~$0.04       |
+| Complex App | 2 MB   | 100+   | ~200,000    | ~$0.08       |
 
 \*Based on $40 BSV price
 

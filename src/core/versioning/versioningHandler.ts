@@ -17,7 +17,7 @@ import { retryWithBackoff, shouldRetryError } from '../../utils/retry.js';
 import { IndexerService } from '../../lib/service-providers/IndexerService.js';
 import { formatError } from '../../utils/errors.js';
 import { getManifestLatestVersion } from './utils.js';
-import { MANIFEST_FILENAME } from '../../utils/constants.js';
+import { MANIFEST_FILENAME, DEFAULT_SATS_PER_KB } from '../../utils/constants.js';
 
 let _indexer: IndexerService | null = null;
 
@@ -108,7 +108,7 @@ export async function deployVersioningInscription(
           metaData: metadata,
           paymentPk: paymentKey,
           changeAddress: paymentAddress,
-          satsPerKb: satsPerKb ?? 1,
+          satsPerKb: satsPerKb ?? DEFAULT_SATS_PER_KB,
         });
 
         // Broadcast the transaction
@@ -227,7 +227,7 @@ export async function updateVersioningInscription(
           ordPk: ordPk,
           paymentUtxos,
           changeAddress: paymentAddress,
-          satsPerKb: satsPerKb ?? 1,
+          satsPerKb: satsPerKb ?? DEFAULT_SATS_PER_KB,
         };
 
         // Create transaction spending the previous inscription

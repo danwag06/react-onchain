@@ -14,7 +14,7 @@ import {
 import type { DeploymentConfig } from '../../../core/orchestration/index.js';
 import { config as envConfig } from '../../../lib/config.js';
 import { formatError } from '../../../utils/errors.js';
-import { MANIFEST_FILENAME } from '../../../utils/constants.js';
+import { MANIFEST_FILENAME, DEFAULT_SATS_PER_KB } from '../../../utils/constants.js';
 import { readManifestData, saveDeploymentEnv, displaySummary } from '../../utils.js';
 import { setDebugMode } from '../../../utils/logger.js';
 import {
@@ -229,7 +229,7 @@ export function registerDeployCommand(program: Command): void {
             versioningOriginInscription: result.versioningOriginInscription,
             htmlOriginInscription: result.htmlOriginInscription,
             ordinalContentUrl: result.ordinalContentUrl || envConfig.ordinalContentUrl,
-            satsPerKb: parseInt(options.satsPerKb || '1', 10),
+            satsPerKb: parseInt(options.satsPerKb || String(DEFAULT_SATS_PER_KB), 10),
           });
         }
 

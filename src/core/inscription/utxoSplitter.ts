@@ -13,6 +13,7 @@ import {
   TX_BASE_SIZE,
   TX_INPUT_SIZE,
   TX_OUTPUT_SIZE,
+  DEFAULT_SATS_PER_KB,
 } from '../../utils/constants.js';
 import { createHash } from 'crypto';
 import { addUtxoInput } from './utils.js';
@@ -50,7 +51,7 @@ export async function splitUtxoForParallelInscription(
   indexer: IndexerService,
   outputCount: number,
   satsPerOutput: number | number[],
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   dryRun: boolean = false,
   seedUtxo?: Utxo,
   onProgress?: (message: string) => void
@@ -251,7 +252,7 @@ export async function splitUtxosForBatchChunking(
   totalChunkCount: number,
   avgChunkSize: number,
   batchSize: number,
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   dryRun: boolean = false
 ): Promise<Utxo[][]> {
   // Calculate sats needed per chunk

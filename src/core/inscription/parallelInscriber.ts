@@ -36,7 +36,7 @@ import type { IndexerService } from '../../lib/service-providers/IndexerService.
 import type { InscribedFile } from './inscription.types.js';
 import { createOrdinals, B_PREFIX } from 'js-1sat-ord';
 import { splitUtxoForParallelInscription } from './utxoSplitter.js';
-import { INSCRIPTION_OUTPUT_SATS } from '../../utils/constants.js';
+import { INSCRIPTION_OUTPUT_SATS, DEFAULT_SATS_PER_KB } from '../../utils/constants.js';
 import { CONTENT_PATH } from '../../lib/service-providers/gorilla-pool/constants.js';
 import { addUtxoInput } from './utils.js';
 import { createHash } from 'crypto';
@@ -153,7 +153,7 @@ function createPlaceholderUtxo(satoshis: number, address: string): Utxo {
 async function calculateExactJobFee(
   job: InscriptionJob,
   paymentKey: PrivateKey,
-  satsPerKb: number = 1
+  satsPerKb: number = DEFAULT_SATS_PER_KB
 ): Promise<JobFeeCalculation> {
   const paymentAddress = paymentKey.toAddress().toString();
 
@@ -226,7 +226,7 @@ async function calculateExactJobFee(
 export async function calculateAllJobFees(
   jobs: InscriptionJob[],
   paymentKey: PrivateKey,
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   batchSize: number = 10,
   onProgress?: ProgressCallback
 ): Promise<JobFeeCalculation[]> {
@@ -269,7 +269,7 @@ export async function prepareUtxosForJobs(
   paymentKey: PrivateKey,
   indexer: IndexerService,
   feeCalculations: JobFeeCalculation[],
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   dryRun: boolean = false,
   seedUtxo?: Utxo,
   spentUtxos?: Set<string>,
@@ -314,7 +314,7 @@ async function buildInscriptionTransaction(
   job: InscriptionJob,
   utxo: Utxo,
   paymentKey: PrivateKey,
-  satsPerKb: number = 1
+  satsPerKb: number = DEFAULT_SATS_PER_KB
 ): Promise<BuiltTransaction> {
   let tx: Transaction;
 
@@ -379,7 +379,7 @@ export async function buildAllTransactions(
   jobs: InscriptionJob[],
   utxos: Utxo[],
   paymentKey: PrivateKey,
-  satsPerKb: number = 1
+  satsPerKb: number = DEFAULT_SATS_PER_KB
 ): Promise<BuiltTransaction[]> {
   console.log(`\n🔨 Building ${jobs.length} transactions...`);
 
@@ -529,7 +529,7 @@ async function buildAndBroadcastInBatches(
   utxos: Utxo[],
   paymentKey: PrivateKey,
   indexer: IndexerService,
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   batchSize: number = 10,
   dryRun: boolean = false,
   onProgress?: ProgressCallback
@@ -628,7 +628,7 @@ export async function parallelInscribe(
   jobs: InscriptionJob[],
   paymentKey: PrivateKey,
   indexer: IndexerService,
-  satsPerKb: number = 1,
+  satsPerKb: number = DEFAULT_SATS_PER_KB,
   dryRun: boolean = false,
   batchSize: number = 10,
   seedUtxo?: Utxo,

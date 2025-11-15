@@ -5,6 +5,7 @@ import {
   GORILLA_POOL_CONTENT_URL,
   GORILLA_POOL_INDEXER_URL,
 } from './service-providers/gorilla-pool/constants.js';
+import { DEFAULT_SATS_PER_KB } from '../utils/constants.js';
 
 // Load environment variables from .env file (if it exists)
 dotenv.config();
@@ -34,7 +35,7 @@ export const DEFAULT_CONFIG = {
   ordinalIndexerUrl: GORILLA_POOL_INDEXER_URL,
 
   // Transaction settings,
-  satsPerKb: 1,
+  satsPerKb: DEFAULT_SATS_PER_KB,
 
   // Build settings
   buildDir: './dist',
