@@ -3,7 +3,6 @@
  *
  * API Documentation: https://ordinals.1sat.app
  */
-import axios from 'axios';
 import { IndexerService, GorillaPoolUtxo, UtxoQueryOptions } from '../IndexerService.js';
 import { GORILLA_POOL_INDEXER_URL, GORILLA_POOL_CONTENT_URL } from './constants.js';
 import { P2PKH, Utils } from '@bsv/sdk';
@@ -127,29 +126,23 @@ export class GorillaPoolIndexer extends IndexerService {
   async broadcastTransaction(rawTxHex: string): Promise<string> {
     const url = `${this.baseUrl}/v5/tx`;
 
-    try {
-      const response = await axios.post(url, rawTxHex, {
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-      });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: rawTxHex,
+    });
 
-      if (response.status !== 200) {
-        throw new Error(`Broadcast failed with status: ${response.status}`);
-      }
-
-      return response.data.txid;
-    } catch (error) {
-      console.error('  ❌ Broadcast error details:');
-      if (axios.isAxiosError(error)) {
-        console.error('  Status:', error.response?.status);
-        console.error('  Status text:', error.response?.statusText);
-        console.error('  Response data:', error.response?.data);
-        console.error('  Response headers:', error.response?.headers);
-      }
-      console.error('  Error:', formatError(error));
-      throw new Error(`Broadcast failed: ${formatError(error)}`);
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'unknown');
+      console.error('  Broadcast error details:');
+      console.error('  Status:', response.status);
+      console.error('  Status text:', response.statusText);
+      console.error('  Response data:', errorBody);
+      throw new Error(`Broadcast failed: ${response.status} ${errorBody}`);
     }
+
+    const data = await response.json();
+    return data.txid;
   }
 
   /**
@@ -182,8 +175,9 @@ export class GorillaPoolIndexer extends IndexerService {
     let firstPass = true;
     while (true) {
       const url = `${this.baseUrl}/v5/own/${address}/utxos?txo=true&from=${from}&limit=${limit}&refresh=${firstPass}`;
-      const response = await axios.get(url);
-      const utxo = response.data as GorillaPoolUtxo[];
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Failed to fetch UTXOs: ${response.status}`);
+      const utxo = await response.json() as GorillaPoolUtxo[];
 
       // If no results, we've fetched all available UTXOs
       if (!utxo || utxo.length === 0) {
