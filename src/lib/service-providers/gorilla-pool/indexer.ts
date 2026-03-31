@@ -126,23 +126,27 @@ export class GorillaPoolIndexer extends IndexerService {
   async broadcastTransaction(rawTxHex: string): Promise<string> {
     const url = `${this.baseUrl}/v5/tx`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: rawTxHex,
-    });
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: rawTxHex,
+      });
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => 'unknown');
-      console.error('  Broadcast error details:');
-      console.error('  Status:', response.status);
-      console.error('  Status text:', response.statusText);
-      console.error('  Response data:', errorBody);
-      throw new Error(`Broadcast failed: ${response.status} ${errorBody}`);
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => 'unknown');
+        console.error('  Broadcast error details:');
+        console.error('  Status:', response.status);
+        console.error('  Status text:', response.statusText);
+        console.error('  Response data:', errorBody);
+        throw new Error(`Broadcast failed: ${response.status} ${errorBody}`);
+      }
+
+      const data = await response.json();
+      return data.txid;
+    } catch (error) {
+      throw new Error(`Broadcast failed: ${formatError(error)}`);
     }
-
-    const data = await response.json();
-    return data.txid;
   }
 
   /**
